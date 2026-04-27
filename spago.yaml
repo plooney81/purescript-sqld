@@ -1,0 +1,21 @@
+package:
+  name: sqld
+  dependencies:
+    - arrays
+    - foldable-traversable
+    - maybe
+    - prelude
+    - strings
+    - tuples
+  test:
+    main: Test.Main
+    dependencies:
+      - aff
+      - console
+      - effect
+      - spec
+
+workspace:
+  packageSet:
+    # Run `spago registry package-sets` to find the latest available version.
+    registry: "75.6.0"
