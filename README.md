@@ -1,6 +1,6 @@
 # purescript-sqld
 
-[![CI](https://github.com/YOUR_USERNAME/purescript-sqld/actions/workflows/ci.yml/badge.svg)](https://github.com/YOUR_USERNAME/purescript-sqld/actions/workflows/ci.yml)
+[![CI](https://github.com/plooney81/purescript-sqld/actions/workflows/ci.yml/badge.svg)](https://github.com/plooney81/purescript-sqld/actions/workflows/ci.yml)
 
 A PostgreSQL SQL query builder for PureScript, inspired by [HoneySQL](https://github.com/seancorfield/honeysql). Build queries as plain data, compose them with functions, format them to a parameterised SQL string.
 

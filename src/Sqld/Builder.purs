@@ -1,6 +1,6 @@
 module Sqld.Builder where
 
-import Prelude
+import Prelude hiding (not, between)
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Sqld.Core
@@ -95,8 +95,8 @@ str = Lit <<< LitString
 bool :: Boolean -> Expr
 bool = Lit <<< LitBoolean
 
-null_ :: Expr
-null_ = Lit LitNull
+null :: Expr
+null = Lit LitNull
 
 asc :: Expr -> OrderExpr
 asc e = { expr: e, dir: Asc }
@@ -119,14 +119,14 @@ infix 4 Gte as .>=
 -- Logical combinators
 -- ---------------------------------------------------------------------------
 
-and_ :: Array Expr -> Expr
-and_ = And
+and :: Array Expr -> Expr
+and = And
 
-or_ :: Array Expr -> Expr
-or_ = Or
+or :: Array Expr -> Expr
+or = Or
 
-not_ :: Expr -> Expr
-not_ = Not
+not :: Expr -> Expr
+not = Not
 
 isNull :: Expr -> Expr
 isNull = IsNull
@@ -143,8 +143,8 @@ notIn = NotIn
 like :: Expr -> String -> Expr
 like e pattern = Like e (str pattern)
 
-between_ :: Expr -> Expr -> Expr -> Expr
-between_ = Between
+between :: Expr -> Expr -> Expr -> Expr
+between = Between
 
 raw :: String -> Expr
 raw = Raw

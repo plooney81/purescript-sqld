@@ -1,8 +1,8 @@
 module Test.Sqld.FormatSpec where
 
-import Prelude
+import Prelude hiding (not, between)
 import Sqld.Builder
-import Sqld.Core (FormattedQuery, Literal(..), emptyQuery)
+import Sqld.Core (Literal(..), Query, emptyQuery)
 import Sqld.Format (format)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -129,7 +129,7 @@ formatSpec = describe "Sqld.Format" do
       r.params `shouldEqual` []
 
     it "NOT wraps the inner expression" do
-      let r = format $ emptyQuery # from "t" # where_ (not_ (col "deleted" .== bool true))
+      let r = format $ emptyQuery # from "t" # where_ (not (col "deleted" .== bool true))
       r.sql `shouldEqual` "SELECT * FROM \"t\" WHERE NOT \"deleted\" = $1"
       r.params `shouldEqual` [LitBoolean true]
 
@@ -141,17 +141,17 @@ formatSpec = describe "Sqld.Format" do
       r.params `shouldEqual` []
 
   describe "AND / OR" do
-    it "and_ of multiple conditions" do
+    it "and of multiple conditions" do
       let r = format $ emptyQuery
                 # from "t"
-                # where_ (and_ [col "a" .== int 1, col "b" .== int 2, col "c" .== int 3])
+                # where_ (and [col "a" .== int 1, col "b" .== int 2, col "c" .== int 3])
       r.sql `shouldEqual` "SELECT * FROM \"t\" WHERE (\"a\" = $1 AND \"b\" = $2 AND \"c\" = $3)"
       r.params `shouldEqual` [LitInt 1, LitInt 2, LitInt 3]
 
-    it "or_ of multiple conditions" do
+    it "or of multiple conditions" do
       let r = format $ emptyQuery
                 # from "t"
-                # where_ (or_ [col "x" .== int 1, col "x" .== int 2])
+                # where_ (or [col "x" .== int 1, col "x" .== int 2])
       r.sql `shouldEqual` "SELECT * FROM \"t\" WHERE (\"x\" = $1 OR \"x\" = $2)"
       r.params `shouldEqual` [LitInt 1, LitInt 2]
 
@@ -159,8 +159,8 @@ formatSpec = describe "Sqld.Format" do
       let r = format $ emptyQuery
                 # from "users"
                 # where_
-                    (and_
-                      [ or_ [ col "status" .== str "active"
+                    (and
+                      [ or [ col "status" .== str "active"
                              , col "status" .== str "pending" ]
                       , col "age" .>= int 18
                       ])
@@ -168,13 +168,13 @@ formatSpec = describe "Sqld.Format" do
         "SELECT * FROM \"users\" WHERE ((\"status\" = $1 OR \"status\" = $2) AND \"age\" >= $3)"
       r.params `shouldEqual` [LitString "active", LitString "pending", LitInt 18]
 
-    it "empty and_ produces TRUE" do
-      let r = format $ emptyQuery # from "t" # where_ (and_ [])
+    it "empty and produces TRUE" do
+      let r = format $ emptyQuery # from "t" # where_ (and [])
       r.sql `shouldEqual` "SELECT * FROM \"t\" WHERE TRUE"
       r.params `shouldEqual` []
 
-    it "empty or_ produces FALSE" do
-      let r = format $ emptyQuery # from "t" # where_ (or_ [])
+    it "empty or produces FALSE" do
+      let r = format $ emptyQuery # from "t" # where_ (or [])
       r.sql `shouldEqual` "SELECT * FROM \"t\" WHERE FALSE"
       r.params `shouldEqual` []
 
@@ -197,7 +197,7 @@ formatSpec = describe "Sqld.Format" do
     it "BETWEEN low and high" do
       let r = format $ emptyQuery
                 # from "orders"
-                # where_ (between_ (col "total") (int 100) (int 500))
+                # where_ (between (col "total") (int 100) (int 500))
       r.sql `shouldEqual` "SELECT * FROM \"orders\" WHERE \"total\" BETWEEN $1 AND $2"
       r.params `shouldEqual` [LitInt 100, LitInt 500]
 
@@ -288,11 +288,53 @@ formatSpec = describe "Sqld.Format" do
         "SELECT * FROM \"a\" JOIN \"b\" ON (\"a.id\" = \"b.a_id\") JOIN \"c\" ON (\"a.id\" = \"c.a_id\")"
       r.params `shouldEqual` []
 
+  describe "integration" do
+    it "multi-column select with WHERE (example1)" do
+      let r = format $ emptyQuery
+                # select [s (col "id"), s (col "name"), s (col "email")]
+                # from "users"
+                # where_ (col "id" .== int 42)
+      r.sql `shouldEqual`
+        "SELECT \"id\", \"name\", \"email\" FROM \"users\" WHERE \"id\" = $1"
+      r.params `shouldEqual` [LitInt 42]
+
+  describe "function composition (>>>)" do
+    -- Reusable Query -> Query building blocks composed with >>>
+    let baseUsers :: Query -> Query
+        baseUsers = select [star] >>> from "users"
+
+        activeOnly :: Query -> Query
+        activeOnly = where_ (col "active" .== bool true)
+
+        paginate :: Int -> Int -> Query -> Query
+        paginate size page = limit size >>> offset (size * page)
+
+    it "composes two builders with >>>" do
+      let r = format $ baseUsers $ emptyQuery
+      r.sql `shouldEqual` "SELECT * FROM \"users\""
+      r.params `shouldEqual` []
+
+    it "chains multiple builders with >>>" do
+      let r = format $ baseUsers >>> activeOnly $ emptyQuery
+      r.sql `shouldEqual` "SELECT * FROM \"users\" WHERE \"active\" = $1"
+      r.params `shouldEqual` [LitBoolean true]
+
+    it "paginate helper produces correct LIMIT / OFFSET" do
+      let r = format $ baseUsers >>> activeOnly >>> paginate 10 2 $ emptyQuery
+      r.sql `shouldEqual`
+        "SELECT * FROM \"users\" WHERE \"active\" = $1 LIMIT 10 OFFSET 20"
+      r.params `shouldEqual` [LitBoolean true]
+
+    it "page 0 gives OFFSET 0" do
+      let r = format $ paginate 20 0 $ emptyQuery # from "t"
+      r.sql `shouldEqual` "SELECT * FROM \"t\" LIMIT 20 OFFSET 0"
+      r.params `shouldEqual` []
+
   describe "param numbering" do
     it "numbers params left-to-right across the whole query" do
       let r = format $ emptyQuery
                 # from "t"
-                # where_ (and_ [col "a" .== int 1, col "b" .== int 2, col "c" .== int 3])
+                # where_ (and [col "a" .== int 1, col "b" .== int 2, col "c" .== int 3])
       r.params `shouldEqual` [LitInt 1, LitInt 2, LitInt 3]
 
     it "JOIN ON params come before WHERE params" do
