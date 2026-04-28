@@ -1,7 +1,7 @@
 module Sqld.Format where
 
 import Prelude
-import Data.Array (filter) as Array
+import Data.Array (filter, mapWithIndex, reverse) as Array
 import Data.Foldable (foldl, intercalate)
 import Data.Maybe (Maybe(..), maybe)
 import Data.String as String
@@ -30,6 +30,28 @@ format :: Query -> FormattedQuery
 format q =
   let Tuple sql state = formatQuery q initialState
   in { sql, params: state.params }
+
+-- | Inline all literals directly into the SQL string.
+-- | Intended for debugging and logging only — never pass user input through this.
+formatInline :: Query -> String
+formatInline q =
+  let { sql, params } = format q
+      -- Substitute from highest index first so $10 isn't clobbered by $1
+      subs = Array.reverse (Array.mapWithIndex (\i l -> Tuple (i + 1) l) params)
+  in foldl
+       (\acc (Tuple i l) -> String.replaceAll
+         (String.Pattern ("$" <> show i))
+         (String.Replacement (inlineLiteral l))
+         acc)
+       sql
+       subs
+
+inlineLiteral :: Literal -> String
+inlineLiteral (LitInt n)     = show n
+inlineLiteral (LitNumber n)  = show n
+inlineLiteral (LitString s)  = "'" <> String.replaceAll (String.Pattern "'") (String.Replacement "''") s <> "'"
+inlineLiteral (LitBoolean b) = if b then "TRUE" else "FALSE"
+inlineLiteral LitNull        = "NULL"
 
 -- ---------------------------------------------------------------------------
 -- Query-level formatter

@@ -3,7 +3,7 @@ module Test.Sqld.FormatSpec where
 import Prelude hiding (not, between)
 import Sqld.Builder
 import Sqld.Core (Literal(..), Query, emptyQuery)
-import Sqld.Format (format)
+import Sqld.Format (format, formatInline)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -329,6 +329,38 @@ formatSpec = describe "Sqld.Format" do
       let r = format $ paginate 20 0 $ emptyQuery # from "t"
       r.sql `shouldEqual` "SELECT * FROM \"t\" LIMIT 20 OFFSET 0"
       r.params `shouldEqual` []
+
+  describe "formatInline" do
+    it "inlines an integer" do
+      formatInline (emptyQuery # from "t" # where_ (col "id" .== int 42))
+        `shouldEqual` "SELECT * FROM \"t\" WHERE \"id\" = 42"
+
+    it "inlines a string with single-quote escaping" do
+      formatInline (emptyQuery # from "t" # where_ (col "name" .== str "O'Brien"))
+        `shouldEqual` "SELECT * FROM \"t\" WHERE \"name\" = 'O''Brien'"
+
+    it "inlines TRUE / FALSE" do
+      formatInline (emptyQuery # from "t" # where_ (col "active" .== bool true))
+        `shouldEqual` "SELECT * FROM \"t\" WHERE \"active\" = TRUE"
+
+    it "inlines NULL" do
+      formatInline (emptyQuery # from "t" # where_ (col "x" .== null))
+        `shouldEqual` "SELECT * FROM \"t\" WHERE \"x\" = NULL"
+
+    it "inlines multiple params in correct left-to-right order" do
+      formatInline
+        ( emptyQuery # from "t"
+            # where_ (and [ col "a" .== int 1
+                           , col "b" .== str "x"
+                           , col "c" .== bool false
+                           ])
+        )
+        `shouldEqual`
+          "SELECT * FROM \"t\" WHERE (\"a\" = 1 AND \"b\" = 'x' AND \"c\" = FALSE)"
+
+    it "handles no params" do
+      formatInline (emptyQuery # from "t")
+        `shouldEqual` "SELECT * FROM \"t\""
 
   describe "param numbering" do
     it "numbers params left-to-right across the whole query" do
