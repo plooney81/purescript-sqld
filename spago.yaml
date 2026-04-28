@@ -1,5 +1,11 @@
 package:
   name: sqld
+  publish:
+    version: "0.1.0"
+    license: "MIT"
+    location:
+      githubOwner: "plooney81"
+      githubRepo: "purescript-sqld"
   dependencies:
     - arrays
     - foldable-traversable
