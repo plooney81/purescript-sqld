@@ -1,9 +1,19 @@
 module Sqld.Builder where
 
-import Prelude hiding (not, between)
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
-import Sqld.Core
+import Prelude (($), (<<<), (<>))
+import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation, SelectExpr(..))
+
+-- ---------------------------------------------------------------------------
+-- Internal record helpers
+-- ---------------------------------------------------------------------------
+
+rel :: String -> Relation
+rel name = { name, alias: Nothing }
+
+relAs :: String -> String -> Relation
+relAs name alias = { name, alias: Just alias }
 
 -- ---------------------------------------------------------------------------
 -- Query builders — each is Query -> Query so they compose with >>> or #
@@ -13,10 +23,10 @@ select :: Array SelectExpr -> Query -> Query
 select exprs q = q { select = exprs }
 
 from :: String -> Query -> Query
-from table q = q { from = Just { name: table, alias: Nothing } }
+from table q = q { from = Just (rel table) }
 
 fromAs :: String -> String -> Query -> Query
-fromAs table alias q = q { from = Just { name: table, alias: Just alias } }
+fromAs table alias q = q { from = Just (relAs table alias) }
 
 -- | Append a WHERE clause; ANDs with any existing condition.
 where_ :: Expr -> Query -> Query
@@ -30,18 +40,15 @@ setWhere expr q = q { where_ = Just expr }
 
 innerJoin :: String -> Expr -> Query -> Query
 innerJoin table on q =
-  q { joins = q.joins <>
-        [{ type_: InnerJoin, relation: { name: table, alias: Nothing }, on }] }
+  q { joins = q.joins <> [{ type_: InnerJoin, relation: rel table, on }] }
 
 leftJoin :: String -> Expr -> Query -> Query
 leftJoin table on q =
-  q { joins = q.joins <>
-        [{ type_: LeftJoin, relation: { name: table, alias: Nothing }, on }] }
+  q { joins = q.joins <> [{ type_: LeftJoin, relation: rel table, on }] }
 
 leftJoinAs :: String -> String -> Expr -> Query -> Query
 leftJoinAs table alias on q =
-  q { joins = q.joins <>
-        [{ type_: LeftJoin, relation: { name: table, alias: Just alias }, on }] }
+  q { joins = q.joins <> [{ type_: LeftJoin, relation: relAs table alias, on }] }
 
 orderBy :: Array OrderExpr -> Query -> Query
 orderBy exprs q = q { orderBy = exprs }
