@@ -6,7 +6,7 @@ import Data.Foldable (foldl, intercalate)
 import Data.Maybe (Maybe(..), maybe)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core
+import Sqld.Core (Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation, SelectExpr(..))
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -69,7 +69,7 @@ formatQuery q state0 =
     Tuple orderBySql s7 = formatOrderBy q.orderBy s6
     limitSql             = formatLimit  q.limit
     offsetSql            = formatOffset q.offset
-    parts = Array.filter (_ /= "")
+    parts = Array.filter (_ /= mempty)
       [ selectSql, fromSql, joinsSql, whereSql
       , groupBySql, havingSql, orderBySql, limitSql, offsetSql ]
     sql = intercalate " " parts
@@ -97,15 +97,15 @@ formatSelectExpr (SelectAs e alias) state =
   Tuple (exprSql <> " AS " <> quoteIdent alias) s'
 
 formatFrom :: Maybe Relation -> WithState String
-formatFrom Nothing  state = Tuple "" state
+formatFrom Nothing  state = Tuple mempty state
 formatFrom (Just r) state = Tuple ("FROM " <> formatRelation r) state
 
 formatRelation :: Relation -> String
 formatRelation { name, alias } =
-  quoteIdent name <> maybe "" (\a -> " AS " <> quoteIdent a) alias
+  quoteIdent name <> maybe mempty (\a -> " AS " <> quoteIdent a) alias
 
 formatJoins :: Array Join -> WithState String
-formatJoins [] state = Tuple "" state
+formatJoins [] state = Tuple mempty state
 formatJoins joins state =
   let Tuple parts s' = mapAccum formatJoin state joins
   in Tuple (intercalate " " parts) s'
@@ -123,25 +123,25 @@ formatJoin j state =
     Tuple (kw <> " " <> formatRelation j.relation <> " ON (" <> onSql <> ")") s'
 
 formatWhere :: Maybe Expr -> WithState String
-formatWhere Nothing  state = Tuple "" state
+formatWhere Nothing  state = Tuple mempty state
 formatWhere (Just e) state =
   let Tuple sql s' = formatExpr e state
   in Tuple ("WHERE " <> sql) s'
 
 formatGroupBy :: Array Expr -> WithState String
-formatGroupBy [] state = Tuple "" state
+formatGroupBy [] state = Tuple mempty state
 formatGroupBy exprs state =
   let Tuple parts s' = mapAccum formatExpr state exprs
   in Tuple ("GROUP BY " <> intercalate ", " parts) s'
 
 formatHaving :: Maybe Expr -> WithState String
-formatHaving Nothing  state = Tuple "" state
+formatHaving Nothing  state = Tuple mempty state
 formatHaving (Just e) state =
   let Tuple sql s' = formatExpr e state
   in Tuple ("HAVING " <> sql) s'
 
 formatOrderBy :: Array OrderExpr -> WithState String
-formatOrderBy [] state = Tuple "" state
+formatOrderBy [] state = Tuple mempty state
 formatOrderBy exprs state =
   let Tuple parts s' = mapAccum formatOrderExpr state exprs
   in Tuple ("ORDER BY " <> intercalate ", " parts) s'
@@ -156,11 +156,11 @@ formatOrderExpr { expr, dir } state =
   in Tuple (sql <> " " <> dirSql) s'
 
 formatLimit :: Maybe Int -> String
-formatLimit Nothing  = ""
+formatLimit Nothing  = mempty
 formatLimit (Just n) = "LIMIT " <> show n
 
 formatOffset :: Maybe Int -> String
-formatOffset Nothing  = ""
+formatOffset Nothing  = mempty
 formatOffset (Just n) = "OFFSET " <> show n
 
 -- ---------------------------------------------------------------------------
