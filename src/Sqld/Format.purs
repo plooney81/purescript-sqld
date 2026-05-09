@@ -12,15 +12,15 @@ import Sqld.Core (Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), Ord
 -- State threading — pure, no Effect
 -- ---------------------------------------------------------------------------
 
-type FormatState =
+type Bindings =
   { params  :: Array Literal
   , counter :: Int
   }
 
-initialState :: FormatState
-initialState = { params: [], counter: 0 }
+emptyBindings :: Bindings
+emptyBindings = { params: [], counter: 0 }
 
-type WithState a = FormatState -> Tuple a FormatState
+type WithBindings a = Bindings -> Tuple a Bindings
 
 -- ---------------------------------------------------------------------------
 -- Public entry points
@@ -28,7 +28,7 @@ type WithState a = FormatState -> Tuple a FormatState
 
 format :: Query -> FormattedQuery
 format q =
-  let Tuple sql state = formatQuery " " q initialState
+  let Tuple sql state = formatQuery " " q emptyBindings
   in { sql, params: state.params }
 
 -- | Inline all literals directly into the SQL string, single line.
@@ -43,7 +43,7 @@ formatPretty = inlineWith "\n"
 
 inlineWith :: String -> Query -> String
 inlineWith sep q =
-  let Tuple sql state = formatQuery sep q initialState
+  let Tuple sql state = formatQuery sep q emptyBindings
       -- Substitute from highest index first so $10 isn't clobbered by $1
       subs = Array.reverse (Array.mapWithIndex (\i l -> Tuple (i + 1) l) state.params)
   in foldl
@@ -65,7 +65,7 @@ inlineLiteral LitNull        = "NULL"
 -- Query-level formatter
 -- ---------------------------------------------------------------------------
 
-formatQuery :: String -> Query -> WithState String
+formatQuery :: String -> Query -> WithBindings String
 formatQuery sep q state0 =
   let
     Tuple selectSql  s1 = formatSelect  q.select  state0
@@ -88,12 +88,12 @@ formatQuery sep q state0 =
 -- Clause formatters
 -- ---------------------------------------------------------------------------
 
-formatSelect :: Array SelectExpr -> WithState String
+formatSelect :: Array SelectExpr -> WithBindings String
 formatSelect exprs state =
   let Tuple parts s' = mapAccum formatSelectExpr state exprs
   in Tuple ("SELECT " <> intercalate ", " parts) s'
 
-formatSelectExpr :: SelectExpr -> WithState String
+formatSelectExpr :: SelectExpr -> WithBindings String
 formatSelectExpr SelectStar state =
   Tuple "*" state
 formatSelectExpr (SelectStarFrom t) state =
@@ -104,7 +104,7 @@ formatSelectExpr (SelectAs e alias) state =
   let Tuple exprSql s' = formatExpr e state in
   Tuple (exprSql <> " AS " <> quoteIdent alias) s'
 
-formatFrom :: Maybe Relation -> WithState String
+formatFrom :: Maybe Relation -> WithBindings String
 formatFrom Nothing  state = Tuple mempty state
 formatFrom (Just r) state = Tuple ("FROM " <> formatRelation r) state
 
@@ -112,13 +112,13 @@ formatRelation :: Relation -> String
 formatRelation { name, alias } =
   quoteIdent name <> maybe mempty (\a -> " AS " <> quoteIdent a) alias
 
-formatJoins :: String -> Array Join -> WithState String
+formatJoins :: String -> Array Join -> WithBindings String
 formatJoins _ [] state = Tuple mempty state
 formatJoins sep joins state =
   let Tuple parts s' = mapAccum formatJoin state joins
   in Tuple (intercalate sep parts) s'
 
-formatJoin :: Join -> WithState String
+formatJoin :: Join -> WithBindings String
 formatJoin j state =
   let
     kw = case j.type_ of
@@ -130,31 +130,31 @@ formatJoin j state =
   in
     Tuple (kw <> " " <> formatRelation j.relation <> " ON (" <> onSql <> ")") s'
 
-formatWhere :: Maybe Expr -> WithState String
+formatWhere :: Maybe Expr -> WithBindings String
 formatWhere Nothing  state = Tuple mempty state
 formatWhere (Just e) state =
   let Tuple sql s' = formatExpr e state
   in Tuple ("WHERE " <> sql) s'
 
-formatGroupBy :: Array Expr -> WithState String
+formatGroupBy :: Array Expr -> WithBindings String
 formatGroupBy [] state = Tuple mempty state
 formatGroupBy exprs state =
   let Tuple parts s' = mapAccum formatExpr state exprs
   in Tuple ("GROUP BY " <> intercalate ", " parts) s'
 
-formatHaving :: Maybe Expr -> WithState String
+formatHaving :: Maybe Expr -> WithBindings String
 formatHaving Nothing  state = Tuple mempty state
 formatHaving (Just e) state =
   let Tuple sql s' = formatExpr e state
   in Tuple ("HAVING " <> sql) s'
 
-formatOrderBy :: Array OrderExpr -> WithState String
+formatOrderBy :: Array OrderExpr -> WithBindings String
 formatOrderBy [] state = Tuple mempty state
 formatOrderBy exprs state =
   let Tuple parts s' = mapAccum formatOrderExpr state exprs
   in Tuple ("ORDER BY " <> intercalate ", " parts) s'
 
-formatOrderExpr :: OrderExpr -> WithState String
+formatOrderExpr :: OrderExpr -> WithBindings String
 formatOrderExpr { expr, dir } state =
   let
     Tuple sql s' = formatExpr expr state
@@ -175,7 +175,7 @@ formatOffset (Just n) = "OFFSET " <> show n
 -- Expression formatter — recursive, left-to-right param numbering
 -- ---------------------------------------------------------------------------
 
-formatExpr :: Expr -> WithState String
+formatExpr :: Expr -> WithBindings String
 formatExpr (Col { table: Nothing, column }) state =
   Tuple (quoteIdent column) state
 formatExpr (Col { table: Just t, column }) state =
@@ -238,14 +238,14 @@ formatExpr (Raw sql) state = Tuple sql state
 -- Helpers
 -- ---------------------------------------------------------------------------
 
-formatBinOp :: String -> Expr -> Expr -> WithState String
+formatBinOp :: String -> Expr -> Expr -> WithBindings String
 formatBinOp op l r state =
   let
     Tuple lSql s1 = formatExpr l state
     Tuple rSql s2 = formatExpr r s1
   in Tuple (lSql <> " " <> op <> " " <> rSql) s2
 
-mapAccum :: ∀ a. (a -> WithState String) -> FormatState -> Array a -> Tuple (Array String) FormatState
+mapAccum :: ∀ a. (a -> WithBindings String) -> Bindings -> Array a -> Tuple (Array String) Bindings
 mapAccum f s0 xs = foldl step (Tuple [] s0) xs
   where
   step (Tuple acc st) x =
