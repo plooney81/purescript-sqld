@@ -1,7 +1,9 @@
 module Example.Main where
 
 import Prelude
+
 import Data.Maybe (Maybe(..), maybe)
+import Data.Newtype (class Newtype, unwrap)
 import Effect (Effect)
 import Effect.Console (log)
 import Sqld.Core (Query, emptyQuery)
@@ -14,16 +16,20 @@ import Sqld.Select (cols, desc, from, limit, offset, orderBy, select, where_)
 -- ---------------------------------------------------------------------------
 
 activeUsers :: Query -> Query
-activeUsers =
-  select (cols ["id", "email", "role", "created_at"])
+activeUsers = select (cols ["id", "email", "role", "created_at"])
   >>> from "users"
   >>> where_ (col "active" .== bool true)
 
 byRole :: String -> Query -> Query
-byRole role = where_ (col "role" .== str role)
+byRole role = where_ $ col "role" .== str role
 
-byEmailDomain :: String -> Query -> Query
-byEmailDomain domain = where_ (like (col "email") ("%" <> domain))
+newtype Domain = Domain String
+derive instance Newtype Domain _
+
+byEmailDomain :: Domain -> Query -> Query
+byEmailDomain domain' = where_ (like (col "email") ("%" <> domain))
+  where
+  domain = unwrap domain'
 
 newestFirst :: Query -> Query
 newestFirst = orderBy [desc (col "created_at")]
@@ -35,7 +41,7 @@ paginate pageSize page = limit pageSize >>> offset (pageSize * page)
 -- Compose from optional request params — no string wrangling, no WHERE 1=1
 -- ---------------------------------------------------------------------------
 
-buildUserQuery :: Maybe String -> Maybe String -> Int -> String
+buildUserQuery :: Maybe String -> Maybe Domain -> Int -> String
 buildUserQuery mRole mDomain page =
   activeUsers
   >>> maybe identity byRole        mRole
@@ -58,7 +64,7 @@ main = do
   log $ buildUserQuery (Just "admin") Nothing 0
 
   log "\n-- Users from example.com, page 2"
-  log $ buildUserQuery Nothing (Just "@example.com") 2
+  log $ buildUserQuery Nothing (Just $ Domain "@example.com") 2
 
   log "\n-- Admins from example.com, page 1"
-  log $ buildUserQuery (Just "admin") (Just "@example.com") 1
+  log $ buildUserQuery (Just "admin") (Just $ Domain "@example.com") 1

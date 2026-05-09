@@ -24,6 +24,7 @@ data Expr
   | In Expr (Array Expr)
   | NotIn Expr (Array Expr)
   | Like Expr Expr
+  | ILike Expr Expr
   | Between Expr Expr Expr
   | Raw String
 

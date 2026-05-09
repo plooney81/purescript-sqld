@@ -221,6 +221,11 @@ formatExpr (Like e pat) state =
     Tuple lSql s1 = formatExpr e state
     Tuple rSql s2 = formatExpr pat s1
   in Tuple (lSql <> " LIKE " <> rSql) s2
+formatExpr (ILike e pat) state =
+  let
+    Tuple lSql s1 = formatExpr e state
+    Tuple rSql s2 = formatExpr pat s1
+  in Tuple (lSql <> " ILIKE " <> rSql) s2
 formatExpr (Between e lo hi) state =
   let
     Tuple eSql  s1 = formatExpr e   state

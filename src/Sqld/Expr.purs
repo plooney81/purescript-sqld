@@ -65,5 +65,8 @@ notIn = NotIn
 like :: Expr -> String -> Expr
 like e pattern = Like e (str pattern)
 
+ilike :: Expr -> String -> Expr
+ilike e pattern = ILike e (str pattern)
+
 between :: Expr -> Expr -> Expr -> Expr
 between = Between
