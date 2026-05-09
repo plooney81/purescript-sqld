@@ -8,11 +8,15 @@ package:
       githubRepo: "purescript-sqld"
   dependencies:
     - arrays
+    - console
+    - effect
     - foldable-traversable
     - maybe
     - prelude
     - strings
     - tuples
+  run:
+    main: Example.Main
   test:
     main: Test.Main
     dependencies:

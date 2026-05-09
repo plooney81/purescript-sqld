@@ -30,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `formatInline` — substitutes all values directly into the SQL string (for debugging and logging only)
 - PostgreSQL numbered params (`$1`, `$2`, …); no string interpolation
 - All identifiers double-quoted via `quoteIdent` (PostgreSQL-safe)
+- Pretty Printing Formatting
+- Example Module
 
 ### Changed
 - `select` is now additive — calling it multiple times appends to the select list rather than replacing it

@@ -23,21 +23,29 @@ initialState = { params: [], counter: 0 }
 type WithState a = FormatState -> Tuple a FormatState
 
 -- ---------------------------------------------------------------------------
--- Public entry point
+-- Public entry points
 -- ---------------------------------------------------------------------------
 
 format :: Query -> FormattedQuery
 format q =
-  let Tuple sql state = formatQuery q initialState
+  let Tuple sql state = formatQuery " " q initialState
   in { sql, params: state.params }
 
--- | Inline all literals directly into the SQL string.
+-- | Inline all literals directly into the SQL string, single line.
 -- | Intended for debugging and logging only — never pass user input through this.
 formatInline :: Query -> String
-formatInline q =
-  let { sql, params } = format q
+formatInline = inlineWith " "
+
+-- | Like formatInline but with each clause on its own line.
+-- | Intended for debugging and logging only — never pass user input through this.
+formatPretty :: Query -> String
+formatPretty = inlineWith "\n"
+
+inlineWith :: String -> Query -> String
+inlineWith sep q =
+  let Tuple sql state = formatQuery sep q initialState
       -- Substitute from highest index first so $10 isn't clobbered by $1
-      subs = Array.reverse (Array.mapWithIndex (\i l -> Tuple (i + 1) l) params)
+      subs = Array.reverse (Array.mapWithIndex (\i l -> Tuple (i + 1) l) state.params)
   in foldl
        (\acc (Tuple i l) -> String.replaceAll
          (String.Pattern ("$" <> show i))
@@ -57,12 +65,12 @@ inlineLiteral LitNull        = "NULL"
 -- Query-level formatter
 -- ---------------------------------------------------------------------------
 
-formatQuery :: Query -> WithState String
-formatQuery q state0 =
+formatQuery :: String -> Query -> WithState String
+formatQuery sep q state0 =
   let
     Tuple selectSql  s1 = formatSelect  q.select  state0
     Tuple fromSql    s2 = formatFrom    q.from    s1
-    Tuple joinsSql   s3 = formatJoins   q.joins   s2
+    Tuple joinsSql   s3 = formatJoins   sep q.joins s2
     Tuple whereSql   s4 = formatWhere   q.where_  s3
     Tuple groupBySql s5 = formatGroupBy q.groupBy s4
     Tuple havingSql  s6 = formatHaving  q.having  s5
@@ -72,7 +80,7 @@ formatQuery q state0 =
     parts = Array.filter (_ /= mempty)
       [ selectSql, fromSql, joinsSql, whereSql
       , groupBySql, havingSql, orderBySql, limitSql, offsetSql ]
-    sql = intercalate " " parts
+    sql = intercalate sep parts
   in
     Tuple sql s7
 
@@ -104,11 +112,11 @@ formatRelation :: Relation -> String
 formatRelation { name, alias } =
   quoteIdent name <> maybe mempty (\a -> " AS " <> quoteIdent a) alias
 
-formatJoins :: Array Join -> WithState String
-formatJoins [] state = Tuple mempty state
-formatJoins joins state =
+formatJoins :: String -> Array Join -> WithState String
+formatJoins _ [] state = Tuple mempty state
+formatJoins sep joins state =
   let Tuple parts s' = mapAccum formatJoin state joins
-  in Tuple (intercalate " " parts) s'
+  in Tuple (intercalate sep parts) s'
 
 formatJoin :: Join -> WithState String
 formatJoin j state =
