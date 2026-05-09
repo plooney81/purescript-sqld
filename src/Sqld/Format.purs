@@ -93,8 +93,8 @@ formatSelectExpr (SelectStarFrom t) state =
 formatSelectExpr (SelectExpr e) state =
   formatExpr e state
 formatSelectExpr (SelectAs e alias) state =
-  let Tuple exprSql s' = formatExpr e state
-  in Tuple (exprSql <> " AS " <> quoteIdent alias) s'
+  let Tuple exprSql s' = formatExpr e state in
+  Tuple (exprSql <> " AS " <> quoteIdent alias) s'
 
 formatFrom :: Maybe Relation -> WithState String
 formatFrom Nothing  state = Tuple "" state
@@ -102,7 +102,7 @@ formatFrom (Just r) state = Tuple ("FROM " <> formatRelation r) state
 
 formatRelation :: Relation -> String
 formatRelation { name, alias } =
-  quoteIdent name <> maybe "" (\a -> " " <> quoteIdent a) alias
+  quoteIdent name <> maybe "" (\a -> " AS " <> quoteIdent a) alias
 
 formatJoins :: Array Join -> WithState String
 formatJoins [] state = Tuple "" state
@@ -232,7 +232,7 @@ formatBinOp op l r state =
     Tuple rSql s2 = formatExpr r s1
   in Tuple (lSql <> " " <> op <> " " <> rSql) s2
 
-mapAccum :: forall a. (a -> WithState String) -> FormatState -> Array a -> Tuple (Array String) FormatState
+mapAccum :: ∀ a. (a -> WithState String) -> FormatState -> Array a -> Tuple (Array String) FormatState
 mapAccum f s0 xs = foldl step (Tuple [] s0) xs
   where
   step (Tuple acc st) x =

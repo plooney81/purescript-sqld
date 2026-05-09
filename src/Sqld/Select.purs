@@ -16,10 +16,10 @@ select :: Array SelectExpr -> Query -> Query
 select exprs q = q { select = exprs }
 
 from :: String -> Query -> Query
-from table q = q { from = Just (rel table) }
+from table q = q { from = Just $ rel table }
 
 fromAs :: String -> String -> Query -> Query
-fromAs table alias q = q { from = Just (relAs table alias) }
+fromAs table alias q = q { from = Just $ relAs table alias }
 
 where_ :: Expr -> Query -> Query
 where_ e q = q { where_ = Just $ case q.where_ of
@@ -59,9 +59,6 @@ offset n q = q { offset = Just n }
 star :: SelectExpr
 star = SelectStar
 
-starFrom :: String -> SelectExpr
-starFrom = SelectStarFrom
-
 expr :: Expr -> SelectExpr
 expr = SelectExpr
 
@@ -70,6 +67,12 @@ cols = map (SelectExpr <<< col)
 
 as :: Expr -> String -> SelectExpr
 as = SelectAs
+
+colAs :: String -> String -> SelectExpr
+colAs c alias = SelectAs (col c) alias
+
+tcolAs :: String -> String -> String -> SelectExpr
+tcolAs t c alias = SelectAs (Col { table: Just t, column: c }) alias
 
 asc :: Expr -> OrderExpr
 asc e = { expr: e, dir: Asc }

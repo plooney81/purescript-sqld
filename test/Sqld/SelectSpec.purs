@@ -24,9 +24,17 @@ selectSpec = describe "Sqld.Select" do
       formatInline (emptyQuery # select [as (col "created_at") "ts"] # from "t")
         `shouldEqual` "SELECT \"created_at\" AS \"ts\" FROM \"t\""
 
+    it "colAs shorthand" do
+      formatInline (emptyQuery # select [colAs "created_at" "ts"] # from "t")
+        `shouldEqual` "SELECT \"created_at\" AS \"ts\" FROM \"t\""
+
+    it "tcolAs shorthand" do
+      formatInline (emptyQuery # select [tcolAs "u" "created_at" "ts"] # fromAs "users" "u")
+        `shouldEqual` "SELECT \"u\".\"created_at\" AS \"ts\" FROM \"users\" AS \"u\""
+
     it "table-qualified columns" do
-      formatInline (emptyQuery # select [expr (tcol "u" "id"), expr (tcol "u" "name")] # from "users")
-        `shouldEqual` "SELECT \"u\".\"id\", \"u\".\"name\" FROM \"users\""
+      formatInline (emptyQuery # select [expr (tcol "u" "id"), expr (tcol "u" "name")] # fromAs "users" "u")
+        `shouldEqual` "SELECT \"u\".\"id\", \"u\".\"name\" FROM \"users\" AS \"u\""
 
     it "raw SELECT expression" do
       formatInline (emptyQuery # select [expr (raw "1 + 1")])
@@ -43,7 +51,7 @@ selectSpec = describe "Sqld.Select" do
 
     it "with alias" do
       formatInline (emptyQuery # select [star] # fromAs "users" "u")
-        `shouldEqual` "SELECT * FROM \"users\" \"u\""
+        `shouldEqual` "SELECT * FROM \"users\" AS \"u\""
 
     it "omits FROM when not set" do
       formatInline (emptyQuery # select [expr (raw "1")])
@@ -70,7 +78,7 @@ selectSpec = describe "Sqld.Select" do
             # limit 20
         )
         `shouldEqual`
-          "SELECT \"u\".\"id\", \"p\".\"bio\" FROM \"users\" \"u\" LEFT JOIN \"profiles\" \"p\" ON (\"u\".\"id\" = \"p\".\"user_id\") WHERE \"u\".\"active\" = TRUE ORDER BY \"u\".\"created_at\" DESC LIMIT 20"
+          "SELECT \"u\".\"id\", \"p\".\"bio\" FROM \"users\" AS \"u\" LEFT JOIN \"profiles\" AS \"p\" ON (\"u\".\"id\" = \"p\".\"user_id\") WHERE \"u\".\"active\" = TRUE ORDER BY \"u\".\"created_at\" DESC LIMIT 20"
 
   describe "GROUP BY / HAVING" do
     it "GROUP BY with HAVING and aggregation" do

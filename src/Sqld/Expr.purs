@@ -4,11 +4,14 @@ import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<))
 import Sqld.Core (Expr(..), Literal(..))
 
+colRef :: Maybe String -> String -> Expr
+colRef t c = Col { table: t, column: c }
+
 col :: String -> Expr
-col c = Col { table: Nothing, column: c }
+col = colRef Nothing
 
 tcol :: String -> String -> Expr
-tcol t c = Col { table: Just t, column: c }
+tcol t = colRef $ Just t
 
 lit :: Literal -> Expr
 lit = Lit

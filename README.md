@@ -95,6 +95,8 @@ From `Sqld.Select`:
 | `cols :: Array String -> Array SelectExpr` | `cols ["id", "name"]` | `"id", "name"` |
 | `expr :: Expr -> SelectExpr` | `expr (tcol "u" "id")` | `"u"."id"` |
 | `as :: Expr -> String -> SelectExpr` | `as (raw "COUNT(*)") "n"` | `COUNT(*) AS "n"` |
+| `colAs :: String -> String -> SelectExpr` | `colAs "created_at" "ts"` | `"created_at" AS "ts"` |
+| `tcolAs :: String -> String -> String -> SelectExpr` | `tcolAs "u" "created_at" "ts"` | `"u"."created_at" AS "ts"` |
 | `starFrom :: String -> SelectExpr` | `starFrom "u"` | `"u".*` |
 
 ### Expressions
