@@ -93,6 +93,23 @@ Start with `emptyQuery` and pipe through helpers:
 | `between_` | `between_ (col "n") (int 1) (int 10)` | `"n" BETWEEN $1 AND $2` |
 | `like` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
 
+### Relation constructors
+
+Use these when building queries with record update syntax instead of the builder DSL:
+
+| Function | Example | Result |
+|---|---|---|
+| `rel :: String -> Relation` | `rel "users"` | `{ name: "users", alias: Nothing }` |
+| `relAs :: String -> String -> Relation` | `relAs "users" "u"` | `{ name: "users", alias: Just "u" }` |
+
+```purescript
+-- Record update style (HoneySQL-inspired)
+format $ emptyQuery
+  { from   = Just (rel "users")
+  , where_ = Just (col "id" .== int 42)
+  }
+```
+
 ### SELECT expressions
 
 | Constructor | Example | SQL |

@@ -81,7 +81,6 @@ formatQuery q state0 =
 -- ---------------------------------------------------------------------------
 
 formatSelect :: Array SelectExpr -> WithState String
-formatSelect [] state = Tuple "SELECT *" state
 formatSelect exprs state =
   let Tuple parts s' = mapAccum formatSelectExpr state exprs
   in Tuple ("SELECT " <> intercalate ", " parts) s'
