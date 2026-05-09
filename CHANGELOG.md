@@ -10,15 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-05-08
 
 ### Added
-- `colAs :: String -> String -> SelectExpr` — column reference with inline alias (`"col" AS "alias"`)
-- `tcolAs :: String -> String -> String -> SelectExpr` — table-qualified column reference with inline alias (`"t"."col" AS "alias"`)
 - `Sqld.Expr` module — expression constructors, literals, comparison operators, and logical combinators
 - `Sqld.Select` module — SELECT query builders and select-list helpers
 - `cols :: Array String -> Array SelectExpr` — convenience helper for selecting a list of plain column names
 - `expr :: Expr -> SelectExpr` — wraps an `Expr` into a `SelectExpr` for use in a select list
-
-### Changed
-- Table aliases now render with explicit `AS` keyword (`FROM "users" AS "u"` instead of `FROM "users" "u"`)
+- `colAs :: String -> String -> SelectExpr` — column reference with inline alias (`"col" AS "alias"`)
+- `tcolAs :: String -> String -> String -> SelectExpr` — table-qualified column reference with inline alias (`"t"."col" AS "alias"`)
 - SELECT query builder with composable `Query -> Query` helpers
 - WHERE expressions as a tagged union ADT (`Expr`)
 - JOIN support: `innerJoin`, `leftJoin`, `leftJoinAs`
@@ -33,3 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `formatInline` — substitutes all values directly into the SQL string (for debugging and logging only)
 - PostgreSQL numbered params (`$1`, `$2`, …); no string interpolation
 - All identifiers double-quoted via `quoteIdent` (PostgreSQL-safe)
+
+### Changed
+- `select` is now additive — calling it multiple times appends to the select list rather than replacing it
+- Table aliases now render with explicit `AS` keyword (`FROM "users" AS "u"` instead of `FROM "users" "u"`)
+- Implicit `SELECT *` removed — use `select [star]` explicitly

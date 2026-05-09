@@ -20,6 +20,15 @@ selectSpec = describe "Sqld.Select" do
       formatInline (emptyQuery # select (cols ["id", "name", "email"]) # from "users")
         `shouldEqual` "SELECT \"id\", \"name\", \"email\" FROM \"users\""
 
+    it "calling select twice accumulates" do
+      formatInline
+        ( emptyQuery
+            # select [expr (tcol "u" "id"), expr (tcol "u" "name")]
+            # fromAs "users" "u"
+            # select [expr (col "something_else")]
+        )
+        `shouldEqual` "SELECT \"u\".\"id\", \"u\".\"name\", \"something_else\" FROM \"users\" AS \"u\""
+
     it "aliases a column with AS" do
       formatInline (emptyQuery # select [as (col "created_at") "ts"] # from "t")
         `shouldEqual` "SELECT \"created_at\" AS \"ts\" FROM \"t\""

@@ -71,7 +71,7 @@ Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
 
 | Function | Description |
 |---|---|
-| `select :: Array SelectExpr -> Query -> Query` | Set the SELECT list |
+| `select :: Array SelectExpr -> Query -> Query` | Append to the SELECT list |
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
 | `where_ :: Expr -> Query -> Query` | Add WHERE condition (ANDs with any existing) |

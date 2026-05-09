@@ -13,7 +13,7 @@ relAs :: String -> String -> Relation
 relAs name alias = { name, alias: Just alias }
 
 select :: Array SelectExpr -> Query -> Query
-select exprs q = q { select = exprs }
+select exprs q = q { select = q.select <> exprs }
 
 from :: String -> Query -> Query
 from table q = q { from = Just $ rel table }
