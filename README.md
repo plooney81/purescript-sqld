@@ -10,6 +10,7 @@ A PostgreSQL SQL query builder for PureScript, inspired by [HoneySQL](https://gi
 - **Pure formatting** — `format` has no `Effect`; param state is explicitly threaded
 - **No string interpolation** — literals become numbered params (`$1`, `$2`, …) automatically
 - **Composable builders** — every helper is `Query -> Query`; chain with `#` or `>>>`
+- **Explicit select list** — no implicit `SELECT *`; use `select [star]` when you want it
 - **`raw` escape hatch** — opt out of quoting for unsupported SQL fragments
 
 ## Installation
@@ -32,13 +33,14 @@ workspace:
 ## Quick start
 
 ```purescript
-import Sqld.Builder
 import Sqld.Core (emptyQuery)
+import Sqld.Expr
 import Sqld.Format (format)
+import Sqld.Select
 
 -- SELECT "id", "name" FROM "users" WHERE "id" = $1
 query = format $ emptyQuery
-  # select [s (col "id"), s (col "name")]
+  # select (cols ["id", "name"])
   # from "users"
   # where_ (col "id" .== int 42)
 
@@ -52,15 +54,24 @@ Pass `sql` and `params` directly to your PostgreSQL driver (e.g. `node-postgres`
 await pool.query(query.sql, query.params);
 ```
 
+## Modules
+
+| Module | Contents |
+|---|---|
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `emptyQuery` |
+| `Sqld.Expr` | Expression constructors, literals, operators, logical combinators |
+| `Sqld.Select` | SELECT query builders and select-list helpers |
+| `Sqld.Format` | `format` and `formatInline` |
+
 ## API
 
 ### Building a query
 
-Start with `emptyQuery` and pipe through helpers:
+Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
 
 | Function | Description |
 |---|---|
-| `select :: Array SelectExpr -> Query -> Query` | SET the SELECT list |
+| `select :: Array SelectExpr -> Query -> Query` | Set the SELECT list |
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
 | `where_ :: Expr -> Query -> Query` | Add WHERE condition (ANDs with any existing) |
@@ -74,50 +85,38 @@ Start with `emptyQuery` and pipe through helpers:
 | `offset :: Int -> Query -> Query` | OFFSET |
 | `mergeQueries :: Query -> Query -> Query` | Merge two queries; right side wins for scalars |
 
+### SELECT list helpers
+
+From `Sqld.Select`:
+
+| Constructor | Example | SQL |
+|---|---|---|
+| `star` | `select [star]` | `SELECT *` |
+| `cols :: Array String -> Array SelectExpr` | `cols ["id", "name"]` | `"id", "name"` |
+| `expr :: Expr -> SelectExpr` | `expr (tcol "u" "id")` | `"u"."id"` |
+| `as :: Expr -> String -> SelectExpr` | `as (raw "COUNT(*)") "n"` | `COUNT(*) AS "n"` |
+| `starFrom :: String -> SelectExpr` | `starFrom "u"` | `"u".*` |
+
 ### Expressions
+
+From `Sqld.Expr`:
 
 | Constructor | Example | SQL |
 |---|---|---|
 | `col :: String -> Expr` | `col "name"` | `"name"` |
 | `tcol :: String -> String -> Expr` | `tcol "u" "id"` | `"u"."id"` |
 | `int / str / num / bool` | `int 42` | `$1` |
-| `null_` | `null_` | `$1` (NULL param) |
+| `null` | `null` | `$1` (NULL param) |
 | `raw :: String -> Expr` | `raw "NOW()"` | `NOW()` |
 | `.== .!= .< .<= .> .>=` | `col "age" .> int 18` | `"age" > $1` |
-| `and_ :: Array Expr -> Expr` | `and_ [e1, e2]` | `(e1 AND e2)` |
-| `or_ :: Array Expr -> Expr` | `or_ [e1, e2]` | `(e1 OR e2)` |
-| `not_ :: Expr -> Expr` | `not_ e` | `NOT e` |
+| `and :: Array Expr -> Expr` | `and [e1, e2]` | `(e1 AND e2)` |
+| `or :: Array Expr -> Expr` | `or [e1, e2]` | `(e1 OR e2)` |
+| `not :: Expr -> Expr` | `not e` | `NOT e` |
 | `isNull / isNotNull` | `isNull (col "deleted_at")` | `"deleted_at" IS NULL` |
 | `in_ :: Expr -> Array Expr -> Expr` | `in_ (col "id") [int 1, int 2]` | `"id" IN ($1, $2)` |
 | `notIn` | `notIn (col "s") [str "x"]` | `"s" NOT IN ($1)` |
-| `between_` | `between_ (col "n") (int 1) (int 10)` | `"n" BETWEEN $1 AND $2` |
+| `between` | `between (col "n") (int 1) (int 10)` | `"n" BETWEEN $1 AND $2` |
 | `like` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
-
-### Relation constructors
-
-Use these when building queries with record update syntax instead of the builder DSL:
-
-| Function | Example | Result |
-|---|---|---|
-| `rel :: String -> Relation` | `rel "users"` | `{ name: "users", alias: Nothing }` |
-| `relAs :: String -> String -> Relation` | `relAs "users" "u"` | `{ name: "users", alias: Just "u" }` |
-
-```purescript
--- Record update style (HoneySQL-inspired)
-format $ emptyQuery
-  { from   = Just (rel "users")
-  , where_ = Just (col "id" .== int 42)
-  }
-```
-
-### SELECT expressions
-
-| Constructor | Example | SQL |
-|---|---|---|
-| `star` | `select [star]` | `SELECT *` |
-| `s :: Expr -> SelectExpr` | `s (col "name")` | `"name"` |
-| `as :: Expr -> String -> SelectExpr` | `as (raw "COUNT(*)") "n"` | `COUNT(*) AS "n"` |
-| `starFrom :: String -> SelectExpr` | `starFrom "u"` | `"u".*` |
 
 ### ORDER BY
 
@@ -126,13 +125,21 @@ orderBy [asc (col "name"), desc (col "created_at")]
 -- ORDER BY "name" ASC, "created_at" DESC
 ```
 
-## Composing fragments
-
-The real power is in building reusable query pieces and merging them:
+### Formatting
 
 ```purescript
-baseQuery :: Query -> Query
-baseQuery = select [star] >>> from "users"
+-- Parameterised — use this when passing to a driver
+format :: Query -> { sql :: String, params :: Array Literal }
+
+-- Inlined — use this for logging and debugging only, never for user input
+formatInline :: Query -> String
+```
+
+## Composing fragments
+
+```purescript
+baseUsers :: Query -> Query
+baseUsers = select [star] >>> from "users"
 
 activeOnly :: Query -> Query
 activeOnly = where_ (col "active" .== bool true)
@@ -140,15 +147,15 @@ activeOnly = where_ (col "active" .== bool true)
 paginate :: Int -> Int -> Query -> Query
 paginate size page = limit size >>> offset (size * page)
 
--- Compose:
-result = format $ baseQuery >>> activeOnly >>> paginate 20 0 $ emptyQuery
+result = format $ baseUsers >>> activeOnly >>> paginate 20 0 $ emptyQuery
+-- SELECT * FROM "users" WHERE "active" = $1 LIMIT 20 OFFSET 0
 ```
 
-Or use `mergeQueries` to combine fragments built independently:
+Use `mergeQueries` to combine fragments built independently:
 
 ```purescript
 adminFilter = emptyQuery # where_ (col "role" .== str "admin")
-result = format (mergeQueries baseQuery adminFilter)
+result = format (mergeQueries baseUsers adminFilter)
 ```
 
 ## License
