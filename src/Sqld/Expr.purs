@@ -7,8 +7,9 @@
 -- | `binOp`, `app`, `unary` and `postfix` without falling back to `raw`.
 module Sqld.Expr where
 
-import Prelude (($), (<<<))
+import Prelude (($), (+), (<<<))
 import Data.Maybe (Maybe(..))
+import Data.String as String
 import Sqld.Core (Expr(..), Literal(..), Query)
 
 -- ---------------------------------------------------------------------------
@@ -18,8 +19,16 @@ import Sqld.Core (Expr(..), Literal(..), Query)
 colRef :: Maybe String -> String -> Expr
 colRef t c = Col { table: t, column: c }
 
+-- | A column reference. A dot qualifies the column with a table name or alias,
+-- | so `col "u.id"` is `tcol "u" "id"` and renders `"u"."id"` — which is what
+-- | makes `cols [ "u.id", "u.name" ]` read like the SQL it produces.
+-- |
+-- | Splitting happens at the first dot. An identifier that genuinely contains
+-- | one must go through `tcol` or `colRef`, which never split.
 col :: String -> Expr
-col = colRef Nothing
+col name = case String.indexOf (String.Pattern ".") name of
+  Nothing -> colRef Nothing name
+  Just i  -> tcol (String.take i name) (String.drop (i + 1) name)
 
 tcol :: String -> String -> Expr
 tcol t = colRef $ Just t
