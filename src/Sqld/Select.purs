@@ -120,6 +120,17 @@ starFrom = SelectStarFrom
 expr :: Expr -> SelectExpr
 expr = SelectExpr
 
+-- | The plural of `expr`, for a run of bare expressions.
+-- |
+-- | A PureScript array is homogeneous, so a select list mixing bare and
+-- | aliased items is built by concatenating:
+-- |
+-- |     select (cols [ "department" ] <> [ as countStar "headcount" ])
+-- |
+-- | `select` is also additive, so repeated calls append rather than replace.
+exprs :: Array Expr -> Array SelectExpr
+exprs = map SelectExpr
+
 -- | Plain column references. Names may be dot-qualified: `cols [ "u.id" ]`
 -- | renders `"u"."id"`.
 cols :: Array String -> Array SelectExpr

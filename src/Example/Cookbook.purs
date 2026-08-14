@@ -24,7 +24,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, emptyQuery)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, num, or, raw, str, sub, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, orderBy, rightJoin, select, star, starFrom, tcols, where_)
+import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, star, starFrom, tcols, where_)
 
 type Example =
   { name  :: String
@@ -66,7 +66,7 @@ combiningConditions =
 nullHandling :: Query
 nullHandling =
   emptyQuery
-    # select [ expr (col "id"), as (coalesce [ col "email", str "(none)" ]) "email" ]
+    # select (cols [ "id" ] <> [ as (coalesce [ col "email", str "(none)" ]) "email" ])
     # from "users"
     # where_ (and [ isNotNull (col "name"), isNull (col "department") ])
 
@@ -130,11 +130,12 @@ aggregation :: Query
 aggregation =
   emptyQuery
     # select
-        [ expr (col "department")
-        , as countStar "headcount"
-        , as (count (col "email")) "with_email"
-        , as (avg (col "age")) "mean_age"
-        ]
+        ( cols [ "department" ] <>
+            [ as countStar "headcount"
+            , as (count (col "email")) "with_email"
+            , as (avg (col "age")) "mean_age"
+            ]
+        )
     # from "users"
     # where_ (col "active" .== bool true)
     # groupBy [ col "department" ]
@@ -204,7 +205,7 @@ subqueryIn =
     # where_
         ( inSub (col "id")
             ( emptyQuery
-                # select [ expr (col "user_id") ]
+                # select (cols [ "user_id" ])
                 # from "orders"
                 # where_ (col "total" .> num 100.0)
             )
@@ -217,17 +218,18 @@ scalarSubquery :: Query
 scalarSubquery =
   emptyQuery
     # select
-        [ expr (col "u.name")
-        , as
-            ( sub
-                ( emptyQuery
-                    # select [ expr countStar ]
-                    # from "orders"
-                    # where_ (col "orders.user_id" .== col "u.id")
+        ( cols [ "u.name" ] <>
+            [ as
+                ( sub
+                    ( emptyQuery
+                        # select (exprs [ countStar ])
+                        # from "orders"
+                        # where_ (col "orders.user_id" .== col "u.id")
+                    )
                 )
-            )
-            "order_count"
-        ]
+                "order_count"
+            ]
+        )
     # fromAs "users" "u"
 
 -- #example derived-table
@@ -260,7 +262,7 @@ derivedTableJoin =
     # joinOn InnerJoin
         ( derived
             ( emptyQuery
-                # select [ expr (col "user_id"), as countStar "order_count" ]
+                # select (cols [ "user_id" ] <> [ as countStar "order_count" ])
                 # from "orders"
                 # groupBy [ col "user_id" ]
             )

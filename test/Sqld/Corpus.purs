@@ -27,8 +27,8 @@ import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
 import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
-import Sqld.Expr (and, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, tcols, where_)
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, tcols, where_)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -419,6 +419,15 @@ handWritten =
                     # where_ (tcol "orders" "user_id" .== tcol "u" "id")
                 )
             )
+    }
+
+  -- Select-list composition ---------------------------------------------------
+
+  , { name: "mixed-select-list"
+    , query: emptyQuery
+        # select (cols [ "department" ] <> exprs [ avg (col "age") ] <> [ as countStar "headcount" ])
+        # from "users"
+        # groupBy [ col "department" ]
     }
 
   -- Dot-qualified column references ------------------------------------------

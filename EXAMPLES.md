@@ -105,7 +105,7 @@ is never true in SQL. `coalesce` supplies a fallback.
 nullHandling :: Query
 nullHandling =
   emptyQuery
-    # select [ expr (col "id"), as (coalesce [ col "email", str "(none)" ]) "email" ]
+    # select (cols [ "id" ] <> [ as (coalesce [ col "email", str "(none)" ]) "email" ])
     # from "users"
     # where_ (and [ isNotNull (col "name"), isNull (col "department") ])
 ```
@@ -241,11 +241,12 @@ aggregation :: Query
 aggregation =
   emptyQuery
     # select
-        [ expr (col "department")
-        , as countStar "headcount"
-        , as (count (col "email")) "with_email"
-        , as (avg (col "age")) "mean_age"
-        ]
+        ( cols [ "department" ] <>
+            [ as countStar "headcount"
+            , as (count (col "email")) "with_email"
+            , as (avg (col "age")) "mean_age"
+            ]
+        )
     # from "users"
     # where_ (col "active" .== bool true)
     # groupBy [ col "department" ]
@@ -376,7 +377,7 @@ subqueryIn =
     # where_
         ( inSub (col "id")
             ( emptyQuery
-                # select [ expr (col "user_id") ]
+                # select (cols [ "user_id" ])
                 # from "orders"
                 # where_ (col "total" .> num 100.0)
             )
@@ -404,17 +405,18 @@ scalarSubquery :: Query
 scalarSubquery =
   emptyQuery
     # select
-        [ expr (col "u.name")
-        , as
-            ( sub
-                ( emptyQuery
-                    # select [ expr countStar ]
-                    # from "orders"
-                    # where_ (col "orders.user_id" .== col "u.id")
+        ( cols [ "u.name" ] <>
+            [ as
+                ( sub
+                    ( emptyQuery
+                        # select (exprs [ countStar ])
+                        # from "orders"
+                        # where_ (col "orders.user_id" .== col "u.id")
+                    )
                 )
-            )
-            "order_count"
-        ]
+                "order_count"
+            ]
+        )
     # fromAs "users" "u"
 ```
 
@@ -474,7 +476,7 @@ derivedTableJoin =
     # joinOn InnerJoin
         ( derived
             ( emptyQuery
-                # select [ expr (col "user_id"), as countStar "order_count" ]
+                # select (cols [ "user_id" ] <> [ as countStar "order_count" ])
                 # from "orders"
                 # groupBy [ col "user_id" ]
             )

@@ -75,6 +75,33 @@ selectSpec = describe "Sqld.Select" do
             # formatInline
       query `shouldEqual` "SELECT \"dept\", COUNT(*) AS \"n\" FROM \"t\""
 
+  describe "mixed select lists" do
+    it "concatenates plain columns with aliased expressions" do
+      let query = emptyQuery
+            # select (cols ["department"] <> [as countStar "headcount"])
+            # from "users"
+            # groupBy [col "department"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"department\", COUNT(*) AS \"headcount\" FROM \"users\" GROUP BY \"department\""
+
+    it "exprs wraps a run of bare expressions" do
+      let query = emptyQuery
+            # select (exprs [col "id", avg (col "age")])
+            # from "users"
+            # formatInline
+      query `shouldEqual` "SELECT \"id\", AVG(\"age\") FROM \"users\""
+
+    it "select is additive, so lists can be built up in stages" do
+      let query = emptyQuery
+            # select (cols ["department"])
+            # select [as countStar "headcount"]
+            # from "users"
+            # groupBy [col "department"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"department\", COUNT(*) AS \"headcount\" FROM \"users\" GROUP BY \"department\""
+
   describe "FROM clause" do
     it "bare table" do
       let query = emptyQuery
