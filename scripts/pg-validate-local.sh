@@ -42,9 +42,19 @@ if [ -z "$(docker ps -q -f "name=^${NAME}$")" ]; then
     -p "${PORT}:5432" \
     "$IMAGE" >/dev/null
 
+  # Probe over TCP from the host rather than with `docker exec pg_isready`.
+  # The entrypoint runs a temporary server on a Unix socket while it
+  # bootstraps, then shuts it down and restarts; an in-container check sees
+  # that temporary server and reports ready too early. The temporary server
+  # never listens on TCP, so connecting from here cannot race it.
+  ready() {
+    psql "postgres://postgres:postgres@localhost:${PORT}/${DB}" \
+      -X -q -t -c 'SELECT 1' >/dev/null 2>&1
+  }
+
   printf "pg-validate-local: waiting for postgres"
   for _ in $(seq 1 60); do
-    if docker exec "$NAME" pg_isready -U postgres -d "$DB" >/dev/null 2>&1; then
+    if ready; then
       echo " ready"
       break
     fi
@@ -52,7 +62,7 @@ if [ -z "$(docker ps -q -f "name=^${NAME}$")" ]; then
     sleep 1
   done
 
-  if ! docker exec "$NAME" pg_isready -U postgres -d "$DB" >/dev/null 2>&1; then
+  if ! ready; then
     echo
     echo "pg-validate-local: postgres did not become ready" >&2
     docker logs "$NAME" >&2
