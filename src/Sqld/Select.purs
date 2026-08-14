@@ -3,23 +3,47 @@ module Sqld.Select where
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<), (<>), map)
-import Sqld.Core (Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation, SelectExpr(..))
+import Sqld.Core (Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
 import Sqld.Expr (col)
 
+-- ---------------------------------------------------------------------------
+-- Relations
+-- ---------------------------------------------------------------------------
+
 rel :: String -> Relation
-rel name = { name, alias: Nothing }
+rel name = Table name Nothing
 
 relAs :: String -> String -> Relation
-relAs name alias = { name, alias: Just alias }
+relAs name alias = Table name (Just alias)
+
+-- | A derived table — a subquery in `FROM`. The alias is mandatory because
+-- | PostgreSQL requires one.
+derived :: Query -> String -> Relation
+derived = Derived
+
+-- ---------------------------------------------------------------------------
+-- FROM
+-- ---------------------------------------------------------------------------
+
+fromRel :: Relation -> Query -> Query
+fromRel r q = q { from = Just r }
+
+from :: String -> Query -> Query
+from table = fromRel $ rel table
+
+fromAs :: String -> String -> Query -> Query
+fromAs table alias = fromRel $ relAs table alias
+
+-- | `FROM (SELECT …) AS alias`.
+fromSub :: Query -> String -> Query -> Query
+fromSub sub alias = fromRel $ derived sub alias
+
+-- ---------------------------------------------------------------------------
+-- SELECT / WHERE
+-- ---------------------------------------------------------------------------
 
 select :: Array SelectExpr -> Query -> Query
 select exprs q = q { select = q.select <> exprs }
-
-from :: String -> Query -> Query
-from table q = q { from = Just $ rel table }
-
-fromAs :: String -> String -> Query -> Query
-fromAs table alias q = q { from = Just $ relAs table alias }
 
 where_ :: Expr -> Query -> Query
 where_ e q = q { where_ = Just $ case q.where_ of
@@ -29,17 +53,43 @@ where_ e q = q { where_ = Just $ case q.where_ of
 setWhere :: Expr -> Query -> Query
 setWhere e q = q { where_ = Just e }
 
+-- ---------------------------------------------------------------------------
+-- Joins
+-- ---------------------------------------------------------------------------
+
+-- | The general form. The named helpers below cover the common cases; reach
+-- | for this one to join against a derived table.
+joinOn :: JoinType -> Relation -> Expr -> Query -> Query
+joinOn type_ relation on q =
+  q { joins = q.joins <> [ { type_, relation, on } ] }
+
 innerJoin :: String -> Expr -> Query -> Query
-innerJoin table on q =
-  q { joins = q.joins <> [{ type_: InnerJoin, relation: rel table, on }] }
+innerJoin table = joinOn InnerJoin (rel table)
+
+innerJoinAs :: String -> String -> Expr -> Query -> Query
+innerJoinAs table alias = joinOn InnerJoin (relAs table alias)
 
 leftJoin :: String -> Expr -> Query -> Query
-leftJoin table on q =
-  q { joins = q.joins <> [{ type_: LeftJoin, relation: rel table, on }] }
+leftJoin table = joinOn LeftJoin (rel table)
 
 leftJoinAs :: String -> String -> Expr -> Query -> Query
-leftJoinAs table alias on q =
-  q { joins = q.joins <> [{ type_: LeftJoin, relation: relAs table alias, on }] }
+leftJoinAs table alias = joinOn LeftJoin (relAs table alias)
+
+rightJoin :: String -> Expr -> Query -> Query
+rightJoin table = joinOn RightJoin (rel table)
+
+rightJoinAs :: String -> String -> Expr -> Query -> Query
+rightJoinAs table alias = joinOn RightJoin (relAs table alias)
+
+fullJoin :: String -> Expr -> Query -> Query
+fullJoin table = joinOn FullJoin (rel table)
+
+fullJoinAs :: String -> String -> Expr -> Query -> Query
+fullJoinAs table alias = joinOn FullJoin (relAs table alias)
+
+-- ---------------------------------------------------------------------------
+-- Remaining clauses
+-- ---------------------------------------------------------------------------
 
 orderBy :: Array OrderExpr -> Query -> Query
 orderBy exprs q = q { orderBy = exprs }
@@ -56,8 +106,16 @@ limit n q = q { limit = Just n }
 offset :: Int -> Query -> Query
 offset n q = q { offset = Just n }
 
+-- ---------------------------------------------------------------------------
+-- SELECT list helpers
+-- ---------------------------------------------------------------------------
+
 star :: SelectExpr
 star = SelectStar
+
+-- | `"t".*` — every column of one relation.
+starFrom :: String -> SelectExpr
+starFrom = SelectStarFrom
 
 expr :: Expr -> SelectExpr
 expr = SelectExpr
@@ -79,6 +137,10 @@ asc e = { expr: e, dir: Asc }
 
 desc :: Expr -> OrderExpr
 desc e = { expr: e, dir: Desc }
+
+-- ---------------------------------------------------------------------------
+-- Composition
+-- ---------------------------------------------------------------------------
 
 mergeQueries :: Query -> Query -> Query
 mergeQueries base override =

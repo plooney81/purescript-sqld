@@ -5,7 +5,14 @@ import Data.Maybe (Maybe(..))
 
 type ColumnRef = { table :: Maybe String, column :: String }
 
-type Relation = { name :: String, alias :: Maybe String }
+-- | Anything that can appear in `FROM` or as a join target.
+-- |
+-- | `Derived` takes its alias as a plain `String` rather than a `Maybe`:
+-- | PostgreSQL rejects a subquery in `FROM` without one, so the type rules out
+-- | a query that could never run.
+data Relation
+  = Table String (Maybe String)
+  | Derived Query String
 
 -- | The expression AST.
 -- |

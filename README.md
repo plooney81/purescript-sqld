@@ -74,10 +74,11 @@ Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
 | `select :: Array SelectExpr -> Query -> Query` | Append to the SELECT list |
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
+| `fromSub :: Query -> String -> Query -> Query` | FROM a derived table (subquery + alias) |
 | `where_ :: Expr -> Query -> Query` | Add WHERE condition (ANDs with any existing) |
-| `innerJoin :: String -> Expr -> Query -> Query` | INNER JOIN |
-| `leftJoin :: String -> Expr -> Query -> Query` | LEFT JOIN |
-| `leftJoinAs :: String -> String -> Expr -> Query -> Query` | LEFT JOIN with alias |
+| `innerJoin` / `leftJoin` / `rightJoin` / `fullJoin` | `:: String -> Expr -> Query -> Query` |
+| `innerJoinAs` / `leftJoinAs` / `rightJoinAs` / `fullJoinAs` | `:: String -> String -> Expr -> Query -> Query` |
+| `joinOn :: JoinType -> Relation -> Expr -> Query -> Query` | General form; use it to join a derived table |
 | `groupBy :: Array Expr -> Query -> Query` | GROUP BY |
 | `having :: Expr -> Query -> Query` | HAVING |
 | `orderBy :: Array OrderExpr -> Query -> Query` | ORDER BY |
@@ -143,6 +144,36 @@ still reachable without falling back to `raw`:
 Common aggregates and functions are provided as one-line wrappers over `app`:
 `count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`,
 `upper`.
+
+### Derived tables
+
+A subquery in `FROM`. The alias is a plain `String` rather than a `Maybe`,
+because PostgreSQL rejects a `FROM` subquery without one:
+
+```purescript
+recent = emptyQuery
+  # select [star]
+  # from "orders"
+  # where_ (col "status" .== str "paid")
+
+emptyQuery
+  # select [starFrom "recent"]
+  # fromSub recent "recent"
+  # where_ (tcol "recent" "total" .> int 100)
+-- SELECT "recent".* FROM (SELECT * FROM "orders" WHERE "status" = $1) AS "recent"
+--   WHERE "recent"."total" > $2
+```
+
+Parameters are numbered in the order they appear in the emitted SQL, so a
+derived table's bindings come before the outer query's. Use `joinOn` with
+`derived` to join against one:
+
+```purescript
+emptyQuery
+  # select [star]
+  # fromAs "users" "u"
+  # joinOn InnerJoin (derived totals "t") (tcol "u" "id" .== tcol "t" "user_id")
+```
 
 ### Operator precedence
 

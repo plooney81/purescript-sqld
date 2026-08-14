@@ -6,7 +6,7 @@ import Data.Foldable (foldl, intercalate)
 import Data.Maybe (Maybe(..), maybe)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation, SelectExpr(..))
+import Sqld.Core (Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -106,11 +106,18 @@ formatSelectExpr (SelectAs e alias) state =
 
 formatFrom :: Maybe Relation -> WithBindings String
 formatFrom Nothing  state = Tuple mempty state
-formatFrom (Just r) state = Tuple ("FROM " <> formatRelation r) state
+formatFrom (Just r) state =
+  let Tuple sql s' = formatRelation r state
+  in Tuple ("FROM " <> sql) s'
 
-formatRelation :: Relation -> String
-formatRelation { name, alias } =
-  quoteIdent name <> maybe mempty (\a -> " AS " <> quoteIdent a) alias
+-- | Threads bindings because a derived table carries parameters of its own,
+-- | which must be numbered where they appear in the emitted SQL.
+formatRelation :: Relation -> WithBindings String
+formatRelation (Table name alias) state =
+  Tuple (quoteIdent name <> maybe mempty (\a -> " AS " <> quoteIdent a) alias) state
+formatRelation (Derived q alias) state =
+  let Tuple sql s' = formatQuery " " q state
+  in Tuple ("(" <> sql <> ") AS " <> quoteIdent alias) s'
 
 formatJoins :: String -> Array Join -> WithBindings String
 formatJoins _ [] state = Tuple mempty state
@@ -126,9 +133,12 @@ formatJoin j state =
       LeftJoin  -> "LEFT JOIN"
       RightJoin -> "RIGHT JOIN"
       FullJoin  -> "FULL JOIN"
-    Tuple onSql s' = formatExpr j.on state
+    -- Relation before condition: a derived join target's parameters appear
+    -- earlier in the SQL than the ON clause's.
+    Tuple relSql s1 = formatRelation j.relation state
+    Tuple onSql  s2 = formatExpr j.on s1
   in
-    Tuple (kw <> " " <> formatRelation j.relation <> " ON (" <> onSql <> ")") s'
+    Tuple (kw <> " " <> relSql <> " ON (" <> onSql <> ")") s2
 
 formatWhere :: Maybe Expr -> WithBindings String
 formatWhere Nothing  state = Tuple mempty state

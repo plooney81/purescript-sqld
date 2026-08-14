@@ -25,25 +25,11 @@ import Prelude hiding (between, not)
 import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
-import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation, SelectExpr(..), emptyQuery)
+import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
 import Sqld.Expr (and, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, desc, expr, from, fromAs, groupBy, having, innerJoin, leftJoinAs, limit, offset, orderBy, rel, relAs, select, star, tcolAs, where_)
+import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, where_)
 
 type CorpusEntry = { name :: String, query :: Query }
-
--- ---------------------------------------------------------------------------
--- Builders the public API does not (yet) expose
--- ---------------------------------------------------------------------------
-
--- | `Sqld.Select` has no `rightJoin` / `fullJoin`, so the corpus reaches for the
--- | `Sqld.Core` constructors directly to keep those code paths covered.
-joinWith :: JoinType -> Relation -> Expr -> Query -> Query
-joinWith type_ relation on q =
-  q { joins = q.joins <> [ { type_, relation, on } ] }
-
--- | `Sqld.Select` has no `starFrom`, so build `SelectStarFrom` by hand.
-starFrom :: String -> SelectExpr
-starFrom = SelectStarFrom
 
 -- ---------------------------------------------------------------------------
 -- The corpus
@@ -229,14 +215,14 @@ corpus =
     , query: emptyQuery
         # select [ star ]
         # from "users"
-        # joinWith RightJoin (rel "profiles") (tcol "users" "id" .== tcol "profiles" "user_id")
+        # rightJoin "profiles" (tcol "users" "id" .== tcol "profiles" "user_id")
     }
 
   , { name: "full-join"
     , query: emptyQuery
         # select [ star ]
         # fromAs "users" "u"
-        # joinWith FullJoin (relAs "profiles" "p") (tcol "u" "id" .== tcol "p" "user_id")
+        # fullJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
     }
 
   -- Grouping -----------------------------------------------------------------
@@ -427,6 +413,51 @@ corpus =
             )
     }
 
+  -- Derived tables -----------------------------------------------------------
+
+  , { name: "derived-table"
+    , query: emptyQuery
+        # select [ starFrom "recent" ]
+        # fromSub
+            ( emptyQuery
+                # select (cols [ "id", "user_id", "total" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+            "recent"
+    }
+
+  , { name: "derived-table-aggregate"
+    , query: emptyQuery
+        # select [ expr (tcol "u" "name"), expr (tcol "totals" "order_count") ]
+        # fromAs "users" "u"
+        # joinOn InnerJoin
+            ( derived
+                ( emptyQuery
+                    # select [ expr (col "user_id"), as countStar "order_count" ]
+                    # from "orders"
+                    # groupBy [ col "user_id" ]
+                )
+                "totals"
+            )
+            (tcol "u" "id" .== tcol "totals" "user_id")
+    }
+
+  -- A derived table's parameters sit earlier in the SQL than the outer
+  -- WHERE's, so they must be numbered first.
+  , { name: "derived-table-parameter-ordering"
+    , query: emptyQuery
+        # select [ starFrom "recent" ]
+        # fromSub
+            ( emptyQuery
+                # select (cols [ "id", "user_id", "total" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+            "recent"
+        # where_ (tcol "recent" "total" .> int 100)
+    }
+
   -- Subquery parameters must keep numbering in step with the outer query.
   , { name: "sub-parameter-ordering"
     , query: emptyQuery
@@ -514,9 +545,10 @@ orderTags :: OrderExpr -> Array String
 orderTags o = orderDirTag o.dir : exprTags o.expr
 
 relationTags :: String -> Relation -> Array String
-relationTags prefix r = case r.alias of
+relationTags prefix (Table _ alias) = case alias of
   Nothing -> [ prefix ]
   Just _ -> [ prefix, prefix <> ".alias" ]
+relationTags prefix (Derived q _) = (prefix <> ".derived") : queryTags q
 
 queryTags :: Query -> Array String
 queryTags q =
@@ -600,6 +632,8 @@ requiredTags = Array.sort
   , "Query.from.alias"
   , "Query.join"
   , "Query.join.alias"
+  , "Query.join.derived"
+  , "Query.from.derived"
   , "Query.where"
   , "Query.groupBy"
   , "Query.having"
