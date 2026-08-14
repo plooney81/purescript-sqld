@@ -54,6 +54,17 @@ Pass `sql` and `params` directly to your PostgreSQL driver (e.g. `node-postgres`
 await pool.query(query.sql, query.params);
 ```
 
+## Examples
+
+**[EXAMPLES.md](EXAMPLES.md)** is a worked cookbook — filtering, joins,
+aggregation, subqueries, derived tables, composing fragments from optional
+parameters, and when to reach for `raw`.
+
+It is generated from [`src/Example/Cookbook.purs`](src/Example/Cookbook.purs),
+and every example is replayed against a live PostgreSQL server by the
+validation harness. An example that no longer compiles, or that PostgreSQL
+would reject, fails CI. Run them yourself with `spago run`.
+
 ## Modules
 
 | Module | Contents |

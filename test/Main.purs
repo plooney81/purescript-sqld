@@ -5,7 +5,7 @@ import Effect (Effect)
 import Effect.Aff (launchAff_)
 import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (runSpec)
-import Test.Sqld.CorpusEmit (emitCorpusJson)
+import Test.Sqld.CorpusEmit (emitCorpusJson, emitExamplesJson)
 import Test.Sqld.CorpusSpec (corpusSpec)
 import Test.Sqld.ExprSpec (exprSpec)
 import Test.Sqld.FormatSpec (formatSpec)
@@ -16,6 +16,7 @@ main = do
   -- Emitted before the suite runs so `scripts/validate-sql.mjs` has a corpus to
   -- replay even when a golden test fails.
   emitCorpusJson
+  emitExamplesJson
   launchAff_ $ runSpec [consoleReporter] do
     exprSpec
     selectSpec

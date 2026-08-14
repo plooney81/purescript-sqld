@@ -41,6 +41,11 @@ jobs:
       - name: Run tests
         run: spago test
 
+      # EXAMPLES.md is generated from src/Example/Cookbook.purs; a stale copy
+      # means the published examples no longer match the code.
+      - name: Check EXAMPLES.md is up to date
+        run: node scripts/build-examples.mjs --check
+
       - name: Ensure psql is available
         run: |
           psql --version || {

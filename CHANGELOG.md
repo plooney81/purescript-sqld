@@ -40,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `starFrom :: String -> SelectExpr` — `"t".*`, previously documented in the README but never implemented
 - `notLike` / `notILike`
 - Function wrappers over `app`: `count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`, `upper`
+- `EXAMPLES.md` — a worked cookbook of 19 examples covering filtering, joins, aggregation, subqueries, derived tables, composition and the `raw` escape hatch. Generated from `Example.Cookbook` by `scripts/build-examples.mjs`, which slices the PureScript out of the source file rather than from a copy, so the code shown is the code that ran. Every example is also a corpus entry, so PostgreSQL validates it; CI fails if the file is stale or the examples drift from the source
+- `Example.Cookbook` — the examples as real `Query` values; `spago run` prints each with its SQL
 - PostgreSQL validation harness — every query in the corpus is replayed against a real server via `PREPARE`. Because `PREPARE` runs full parse *analysis* rather than a syntax check alone, unknown columns, invalid `GROUP BY`, and operator type mismatches fail alongside malformed SQL. Both formatter outputs are validated: the parameterised form from `format` and the debug form from `formatInline`
 - `Test.Sqld.Corpus` — one canonical corpus of queries, consumed by both the golden tests and the PostgreSQL harness, with each entry tagged by the AST constructors it exercises
 - Coverage ratchet — `Test.Sqld.CorpusSpec` fails if any `Sqld.Core` constructor has no corpus entry, so a new feature cannot ship without SQL that PostgreSQL has accepted

@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help build test validate validate-fast sql list pg-stop clean
+.PHONY: help build test validate validate-fast sql list examples examples-check pg-stop clean
 
 # Optional filter: `make validate-fast ONLY=join`
 ONLY ?=
@@ -39,6 +39,13 @@ ifndef SQL
 	$(error SQL is not set. Usage: make sql SQL='SELECT 1')
 endif
 	SQLD_SKIP_TEST=1 $(LOCAL_PG) --sql $(call quote,$(SQL))
+
+examples: ## Regenerate EXAMPLES.md from the cookbook
+	spago test
+	@node scripts/build-examples.mjs
+
+examples-check: ## Fail if EXAMPLES.md is out of date
+	@node scripts/build-examples.mjs --check
 
 list: ## List corpus entry names (no database needed)
 	@$(VALIDATOR) --list
