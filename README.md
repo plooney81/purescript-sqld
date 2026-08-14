@@ -59,9 +59,9 @@ await pool.query(query.sql, query.params);
 | Module | Contents |
 |---|---|
 | `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `emptyQuery` |
-| `Sqld.Expr` | Expression constructors, literals, operators, logical combinators |
+| `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
-| `Sqld.Format` | `format` and `formatInline` |
+| `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
 
 ## API
 
@@ -74,10 +74,11 @@ Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
 | `select :: Array SelectExpr -> Query -> Query` | Append to the SELECT list |
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
+| `fromSub :: Query -> String -> Query -> Query` | FROM a derived table (subquery + alias) |
 | `where_ :: Expr -> Query -> Query` | Add WHERE condition (ANDs with any existing) |
-| `innerJoin :: String -> Expr -> Query -> Query` | INNER JOIN |
-| `leftJoin :: String -> Expr -> Query -> Query` | LEFT JOIN |
-| `leftJoinAs :: String -> String -> Expr -> Query -> Query` | LEFT JOIN with alias |
+| `innerJoin` / `leftJoin` / `rightJoin` / `fullJoin` | `:: String -> Expr -> Query -> Query` |
+| `innerJoinAs` / `leftJoinAs` / `rightJoinAs` / `fullJoinAs` | `:: String -> String -> Expr -> Query -> Query` |
+| `joinOn :: JoinType -> Relation -> Expr -> Query -> Query` | General form; use it to join a derived table |
 | `groupBy :: Array Expr -> Query -> Query` | GROUP BY |
 | `having :: Expr -> Query -> Query` | HAVING |
 | `orderBy :: Array OrderExpr -> Query -> Query` | ORDER BY |
@@ -118,7 +119,80 @@ From `Sqld.Expr`:
 | `in_ :: Expr -> Array Expr -> Expr` | `in_ (col "id") [int 1, int 2]` | `"id" IN ($1, $2)` |
 | `notIn` | `notIn (col "s") [str "x"]` | `"s" NOT IN ($1)` |
 | `between` | `between (col "n") (int 1) (int 10)` | `"n" BETWEEN $1 AND $2` |
-| `like` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
+| `like / ilike` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
+| `notLike / notILike` | `notLike (col "email") "%@spam.com"` | `"email" NOT LIKE $1` |
+
+### Generic nodes
+
+The AST keeps only a handful of expression constructors. `App`, `BinOp`, `Cast`
+and `Sub` cover most of PostgreSQL's expression grammar between them, so a
+feature usually needs no new AST node — and anything without a named helper is
+still reachable without falling back to `raw`:
+
+| Constructor | Example | SQL |
+|---|---|---|
+| `app :: String -> Array Expr -> Expr` | `app "LOWER" [col "email"]` | `LOWER("email")` |
+| `binOp :: String -> Expr -> Expr -> Expr` | `binOp "@>" (col "tags") (raw "ARRAY['a']")` | `"tags" @> ARRAY['a']` |
+| `unary :: String -> Expr -> Expr` | `unary "-" (col "n")` | `- "n"` |
+| `postfix :: String -> Expr -> Expr` | `postfix "IS TRUE" (col "ok")` | `"ok" IS TRUE` |
+| `cast :: Expr -> String -> Expr` | `cast (col "id") "text"` | `"id"::text` |
+| `row :: Array Expr -> Expr` | `row [int 1, int 2]` | `(1, 2)` |
+| `sub :: Query -> Expr` | `sub totals` | `(SELECT …)` |
+| `exists / notExists` | `exists orders` | `EXISTS (SELECT …)` |
+| `inSub / notInSub` | `inSub (col "id") orders` | `"id" IN (SELECT …)` |
+
+Common aggregates and functions are provided as one-line wrappers over `app`:
+`count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`,
+`upper`.
+
+### Derived tables
+
+A subquery in `FROM`. The alias is a plain `String` rather than a `Maybe`,
+because PostgreSQL rejects a `FROM` subquery without one:
+
+```purescript
+recent = emptyQuery
+  # select [star]
+  # from "orders"
+  # where_ (col "status" .== str "paid")
+
+emptyQuery
+  # select [starFrom "recent"]
+  # fromSub recent "recent"
+  # where_ (tcol "recent" "total" .> int 100)
+-- SELECT "recent".* FROM (SELECT * FROM "orders" WHERE "status" = $1) AS "recent"
+--   WHERE "recent"."total" > $2
+```
+
+Parameters are numbered in the order they appear in the emitted SQL, so a
+derived table's bindings come before the outer query's. Use `joinOn` with
+`derived` to join against one:
+
+```purescript
+emptyQuery
+  # select [star]
+  # fromAs "users" "u"
+  # joinOn InnerJoin (derived totals "t") (tcol "u" "id" .== tcol "t" "user_id")
+```
+
+### Operator precedence
+
+`format` follows PostgreSQL's precedence table and brackets only where the
+meaning depends on it:
+
+```purescript
+binOp "*" (binOp "+" (col "age") (int 1)) (int 2)
+-- ("age" + 1) * 2      -- bracketed: + binds looser than *
+
+binOp "+" (col "a") (binOp "*" (col "b") (int 2))
+-- "a" + "b" * 2        -- not bracketed: precedence already agrees
+
+binOp "-" (col "a") (binOp "-" (col "b") (col "c"))
+-- "a" - ("b" - "c")    -- bracketed: operators are left-associative
+```
+
+`raw` is exempt — its contents are opaque, so its bracketing is yours to get
+right.
 
 ### ORDER BY
 

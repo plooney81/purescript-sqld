@@ -37,18 +37,17 @@ corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus) <> "\n]\n"
 
 entryJson :: CorpusEntry -> String
 entryJson entry =
-  let
-    formatted = format entry.query
-  in
-    "  { \"name\": " <> jsonString entry.name
-      <> ", \"sql\": "
-      <> jsonString formatted.sql
-      <> ", \"params\": ["
-      <> intercalate ", " (map literalJson formatted.params)
-      <> "]"
-      <> ", \"inlineSql\": "
-      <> jsonString (formatInline entry.query)
-      <> " }"
+  "  { \"name\": " <> jsonString entry.name
+    <> ", \"sql\": "
+    <> jsonString formatted.sql
+    <> ", \"params\": ["
+    <> intercalate ", " (map literalJson formatted.params)
+    <> "]"
+    <> ", \"inlineSql\": "
+    <> jsonString (formatInline entry.query)
+    <> " }"
+  where
+  formatted = format entry.query
 
 literalJson :: Literal -> String
 literalJson = case _ of

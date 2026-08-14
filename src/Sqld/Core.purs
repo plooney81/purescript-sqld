@@ -5,26 +5,46 @@ import Data.Maybe (Maybe(..))
 
 type ColumnRef = { table :: Maybe String, column :: String }
 
-type Relation = { name :: String, alias :: Maybe String }
+-- | Anything that can appear in `FROM` or as a join target.
+-- |
+-- | `Derived` takes its alias as a plain `String` rather than a `Maybe`:
+-- | PostgreSQL rejects a subquery in `FROM` without one, so the type rules out
+-- | a query that could never run.
+data Relation
+  = Table String (Maybe String)
+  | Derived Query String
 
+-- | The expression AST.
+-- |
+-- | Rather than one constructor per SQL feature, the bulk of PostgreSQL's
+-- | expression grammar is covered by a handful of generic nodes:
+-- |
+-- |   * `App`    — any function in `pg_proc`
+-- |   * `BinOp`  — any operator in `pg_operator`
+-- |   * `Cast`   — `expr::type` for any type
+-- |   * `Sub`    — scalar subqueries, `IN (SELECT …)`, `EXISTS (…)`
+-- |
+-- | `Sqld.Expr` layers named, discoverable helpers (`.==`, `like`, `count`)
+-- | on top, so the builder API stays typed and readable.
 data Expr
   = Col ColumnRef
   | Lit Literal
-  | Eq Expr Expr
-  | Neq Expr Expr
-  | Lt Expr Expr
-  | Lte Expr Expr
-  | Gt Expr Expr
-  | Gte Expr Expr
+  -- | Function application: `name(arg, …)`.
+  | App String (Array Expr)
+  -- | Infix operator: `left op right`.
+  | BinOp String Expr Expr
+  -- | Prefix operator: `op operand` (`NOT`, `EXISTS`, unary `-`).
+  | Unary String Expr
+  -- | Postfix operator: `operand op` (`IS NULL`, `IS NOT NULL`).
+  | Postfix String Expr
+  -- | Type cast: `expr::type`.
+  | Cast Expr String
+  -- | Parenthesised list: `(a, b, c)`. Gives `IN` an ordinary right operand.
+  | Row (Array Expr)
+  -- | Subquery in expression position: `(SELECT …)`.
+  | Sub Query
   | And (Array Expr)
   | Or (Array Expr)
-  | Not Expr
-  | IsNull Expr
-  | IsNotNull Expr
-  | In Expr (Array Expr)
-  | NotIn Expr (Array Expr)
-  | Like Expr Expr
-  | ILike Expr Expr
   | Between Expr Expr Expr
   | Raw String
 

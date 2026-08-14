@@ -1,9 +1,9 @@
 module Test.Sqld.SelectSpec where
 
 import Prelude hiding (not, between)
-import Sqld.Core (Query, emptyQuery)
+import Sqld.Core (JoinType(..), Literal(..), Query, emptyQuery)
 import Sqld.Expr
-import Sqld.Format (formatInline)
+import Sqld.Format (format, formatInline)
 import Sqld.Select
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -126,6 +126,72 @@ selectSpec = describe "Sqld.Select" do
             # formatInline
       query `shouldEqual`
         "SELECT \"u\".\"id\", \"p\".\"bio\" FROM \"users\" AS \"u\" LEFT JOIN \"profiles\" AS \"p\" ON (\"u\".\"id\" = \"p\".\"user_id\") WHERE \"u\".\"active\" = TRUE ORDER BY \"u\".\"created_at\" DESC LIMIT 20"
+
+    it "RIGHT JOIN" do
+      let query = emptyQuery
+            # select [star]
+            # from "users"
+            # rightJoin "profiles" (tcol "users" "id" .== tcol "profiles" "user_id")
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" RIGHT JOIN \"profiles\" ON (\"users\".\"id\" = \"profiles\".\"user_id\")"
+
+    it "FULL JOIN with alias" do
+      let query = emptyQuery
+            # select [star]
+            # fromAs "users" "u"
+            # fullJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" FULL JOIN \"profiles\" AS \"p\" ON (\"u\".\"id\" = \"p\".\"user_id\")"
+
+    it "INNER JOIN with alias" do
+      let query = emptyQuery
+            # select [star]
+            # fromAs "users" "u"
+            # innerJoinAs "orders" "o" (tcol "u" "id" .== tcol "o" "user_id")
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" JOIN \"orders\" AS \"o\" ON (\"u\".\"id\" = \"o\".\"user_id\")"
+
+  describe "derived tables" do
+    it "subquery in FROM" do
+      let recent = emptyQuery
+            # select [star]
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+          query = emptyQuery
+            # select [starFrom "recent"]
+            # fromSub recent "recent"
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"recent\".* FROM (SELECT * FROM \"orders\" WHERE \"status\" = 'paid') AS \"recent\""
+
+    it "subquery as a join target" do
+      let totals = emptyQuery # select [expr (col "user_id")] # from "orders"
+          query = emptyQuery
+            # select [star]
+            # fromAs "users" "u"
+            # joinOn InnerJoin (derived totals "t") (tcol "u" "id" .== tcol "t" "user_id")
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" JOIN (SELECT \"user_id\" FROM \"orders\") AS \"t\" ON (\"u\".\"id\" = \"t\".\"user_id\")"
+
+    -- A derived table's parameters appear earlier in the SQL than the outer
+    -- query's, so they must be numbered first.
+    it "parameters are numbered before the outer query's" do
+      let recent = emptyQuery
+            # select [star]
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+          result = emptyQuery
+            # select [starFrom "recent"]
+            # fromSub recent "recent"
+            # where_ (tcol "recent" "total" .> int 100)
+            # format
+      result.sql `shouldEqual`
+        "SELECT \"recent\".* FROM (SELECT * FROM \"orders\" WHERE \"status\" = $1) AS \"recent\" WHERE \"recent\".\"total\" > $2"
+      result.params `shouldEqual` [LitString "paid", LitInt 100]
 
   describe "GROUP BY / HAVING" do
     it "GROUP BY with HAVING and aggregation" do

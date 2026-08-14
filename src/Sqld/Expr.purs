@@ -1,8 +1,19 @@
+-- | Named, discoverable helpers over the generic `Sqld.Core` AST nodes.
+-- |
+-- | `Sqld.Core` keeps the AST small — `App`, `BinOp`, `Cast` and `Sub` cover
+-- | most of PostgreSQL's expression grammar between them. This module is the
+-- | typed surface over that: `.==` builds a `BinOp "="`, `count` builds an
+-- | `App "COUNT"`, and anything without a helper is still reachable through
+-- | `binOp`, `app`, `unary` and `postfix` without falling back to `raw`.
 module Sqld.Expr where
 
-import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<))
-import Sqld.Core (Expr(..), Literal(..))
+import Data.Maybe (Maybe(..))
+import Sqld.Core (Expr(..), Literal(..), Query)
+
+-- ---------------------------------------------------------------------------
+-- Column references
+-- ---------------------------------------------------------------------------
 
 colRef :: Maybe String -> String -> Expr
 colRef t c = Col { table: t, column: c }
@@ -12,6 +23,10 @@ col = colRef Nothing
 
 tcol :: String -> String -> Expr
 tcol t = colRef $ Just t
+
+-- ---------------------------------------------------------------------------
+-- Literals
+-- ---------------------------------------------------------------------------
 
 lit :: Literal -> Expr
 lit = Lit
@@ -31,15 +46,77 @@ bool = Lit <<< LitBoolean
 null :: Expr
 null = Lit LitNull
 
+-- | Escape hatch for SQL this module cannot express. Emitted verbatim, so the
+-- | caller owns both its correctness and its parenthesisation.
 raw :: String -> Expr
 raw = Raw
 
-infix 4 Eq  as .==
-infix 4 Neq as .!=
-infix 4 Lt  as .<
-infix 4 Lte as .<=
-infix 4 Gt  as .>
-infix 4 Gte as .>=
+-- ---------------------------------------------------------------------------
+-- Generic constructors
+-- ---------------------------------------------------------------------------
+
+-- | Any function: `app "COUNT" [col "id"]` renders `COUNT("id")`.
+app :: String -> Array Expr -> Expr
+app = App
+
+-- | Any infix operator: `binOp "@>" a b` renders `a @> b`. Precedence is
+-- | resolved by `Sqld.Format`; unknown operators are treated as PostgreSQL
+-- | treats them, at the generic "other operator" level.
+binOp :: String -> Expr -> Expr -> Expr
+binOp = BinOp
+
+-- | Any prefix operator: `unary "-" e` renders `- e`.
+unary :: String -> Expr -> Expr
+unary = Unary
+
+-- | Any postfix operator: `postfix "IS TRUE" e` renders `e IS TRUE`.
+postfix :: String -> Expr -> Expr
+postfix = Postfix
+
+-- | `cast (col "id") "text"` renders `"id"::text`.
+cast :: Expr -> String -> Expr
+cast = Cast
+
+-- | Parenthesised list: `row [int 1, int 2]` renders `(1, 2)`.
+row :: Array Expr -> Expr
+row = Row
+
+-- | A subquery in expression position: `(SELECT …)`.
+sub :: Query -> Expr
+sub = Sub
+
+-- ---------------------------------------------------------------------------
+-- Comparison
+-- ---------------------------------------------------------------------------
+
+eq :: Expr -> Expr -> Expr
+eq = BinOp "="
+
+neq :: Expr -> Expr -> Expr
+neq = BinOp "<>"
+
+lt :: Expr -> Expr -> Expr
+lt = BinOp "<"
+
+lte :: Expr -> Expr -> Expr
+lte = BinOp "<="
+
+gt :: Expr -> Expr -> Expr
+gt = BinOp ">"
+
+gte :: Expr -> Expr -> Expr
+gte = BinOp ">="
+
+infix 4 eq  as .==
+infix 4 neq as .!=
+infix 4 lt  as .<
+infix 4 lte as .<=
+infix 4 gt  as .>
+infix 4 gte as .>=
+
+-- ---------------------------------------------------------------------------
+-- Logical
+-- ---------------------------------------------------------------------------
 
 and :: Array Expr -> Expr
 and = And
@@ -48,25 +125,91 @@ or :: Array Expr -> Expr
 or = Or
 
 not :: Expr -> Expr
-not = Not
+not = Unary "NOT"
 
 isNull :: Expr -> Expr
-isNull = IsNull
+isNull = Postfix "IS NULL"
 
 isNotNull :: Expr -> Expr
-isNotNull = IsNotNull
+isNotNull = Postfix "IS NOT NULL"
+
+-- ---------------------------------------------------------------------------
+-- Set membership
+-- ---------------------------------------------------------------------------
 
 in_ :: Expr -> Array Expr -> Expr
-in_ = In
+in_ e = BinOp "IN" e <<< Row
 
 notIn :: Expr -> Array Expr -> Expr
-notIn = NotIn
+notIn e = BinOp "NOT IN" e <<< Row
+
+-- | `e IN (SELECT …)`.
+inSub :: Expr -> Query -> Expr
+inSub e = BinOp "IN" e <<< Sub
+
+-- | `e NOT IN (SELECT …)`.
+notInSub :: Expr -> Query -> Expr
+notInSub e = BinOp "NOT IN" e <<< Sub
+
+exists :: Query -> Expr
+exists = Unary "EXISTS" <<< Sub
+
+notExists :: Query -> Expr
+notExists = Unary "NOT EXISTS" <<< Sub
+
+-- ---------------------------------------------------------------------------
+-- Pattern matching
+-- ---------------------------------------------------------------------------
 
 like :: Expr -> String -> Expr
-like e pattern = Like e (str pattern)
+like e = BinOp "LIKE" e <<< str
 
 ilike :: Expr -> String -> Expr
-ilike e pattern = ILike e (str pattern)
+ilike e = BinOp "ILIKE" e <<< str
+
+notLike :: Expr -> String -> Expr
+notLike e = BinOp "NOT LIKE" e <<< str
+
+notILike :: Expr -> String -> Expr
+notILike e = BinOp "NOT ILIKE" e <<< str
+
+-- ---------------------------------------------------------------------------
+-- Ranges
+-- ---------------------------------------------------------------------------
 
 between :: Expr -> Expr -> Expr -> Expr
 between = Between
+
+-- ---------------------------------------------------------------------------
+-- Common functions
+-- ---------------------------------------------------------------------------
+--
+-- A thin convenience layer — every one is a one-line `App`, and any function
+-- PostgreSQL knows is reachable with `app` whether or not it is listed here.
+
+count :: Expr -> Expr
+count e = App "COUNT" [ e ]
+
+countStar :: Expr
+countStar = App "COUNT" [ Raw "*" ]
+
+sum_ :: Expr -> Expr
+sum_ e = App "SUM" [ e ]
+
+avg :: Expr -> Expr
+avg e = App "AVG" [ e ]
+
+min_ :: Expr -> Expr
+min_ e = App "MIN" [ e ]
+
+max_ :: Expr -> Expr
+max_ e = App "MAX" [ e ]
+
+coalesce :: Array Expr -> Expr
+coalesce = App "COALESCE"
+
+lower :: Expr -> Expr
+lower e = App "LOWER" [ e ]
+
+upper :: Expr -> Expr
+upper e = App "UPPER" [ e ]

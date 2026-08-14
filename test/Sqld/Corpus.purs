@@ -25,25 +25,11 @@ import Prelude hiding (between, not)
 import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
-import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation, SelectExpr(..), emptyQuery)
-import Sqld.Expr (and, between, bool, col, ilike, in_, int, isNotNull, isNull, like, not, notIn, null, num, or, raw, str, tcol, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, desc, expr, from, fromAs, groupBy, having, innerJoin, leftJoinAs, limit, offset, orderBy, rel, relAs, select, star, tcolAs, where_)
+import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
+import Sqld.Expr (and, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, where_)
 
 type CorpusEntry = { name :: String, query :: Query }
-
--- ---------------------------------------------------------------------------
--- Builders the public API does not (yet) expose
--- ---------------------------------------------------------------------------
-
--- | `Sqld.Select` has no `rightJoin` / `fullJoin`, so the corpus reaches for the
--- | `Sqld.Core` constructors directly to keep those code paths covered.
-joinWith :: JoinType -> Relation -> Expr -> Query -> Query
-joinWith type_ relation on q =
-  q { joins = q.joins <> [ { type_, relation, on } ] }
-
--- | `Sqld.Select` has no `starFrom`, so build `SelectStarFrom` by hand.
-starFrom :: String -> SelectExpr
-starFrom = SelectStarFrom
 
 -- ---------------------------------------------------------------------------
 -- The corpus
@@ -229,14 +215,14 @@ corpus =
     , query: emptyQuery
         # select [ star ]
         # from "users"
-        # joinWith RightJoin (rel "profiles") (tcol "users" "id" .== tcol "profiles" "user_id")
+        # rightJoin "profiles" (tcol "users" "id" .== tcol "profiles" "user_id")
     }
 
   , { name: "full-join"
     , query: emptyQuery
         # select [ star ]
         # fromAs "users" "u"
-        # joinWith FullJoin (relAs "profiles" "p") (tcol "u" "id" .== tcol "p" "user_id")
+        # fullJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
     }
 
   -- Grouping -----------------------------------------------------------------
@@ -292,6 +278,209 @@ corpus =
         # limit 25
         # offset 50
     }
+
+  -- Function application (App) -----------------------------------------------
+
+  , { name: "app-count-star"
+    , query: emptyQuery # select [ as countStar "n" ] # from "users"
+    }
+
+  , { name: "app-aggregates"
+    , query: emptyQuery
+        # select
+            [ expr (col "department")
+            , as (count (col "id")) "headcount"
+            , as (App "MAX" [ col "age" ]) "oldest"
+            ]
+        # from "users"
+        # groupBy [ col "department" ]
+    }
+
+  , { name: "app-nested"
+    , query: emptyQuery
+        # select [ as (upper (coalesce [ col "email", str "none" ])) "email" ]
+        # from "users"
+    }
+
+  -- Operators (BinOp) --------------------------------------------------------
+
+  , { name: "binop-concat"
+    , query: emptyQuery
+        # select [ as (binOp "||" (col "name") (col "department")) "label" ]
+        # from "users"
+    }
+
+  -- The parentheses in the emitted SQL are the assertion here: without the
+  -- precedence printer this renders as "age" + $1 * $2, which means something
+  -- entirely different and which PostgreSQL would happily accept.
+  , { name: "binop-arithmetic-precedence"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_ (binOp "*" (binOp "+" (col "age") (int 1)) (int 2) .> int 10)
+    }
+
+  , { name: "binop-not-like"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_ (and [ notLike (col "email") "%@spam.test", notILike (col "name") "test%" ])
+    }
+
+  -- Casts --------------------------------------------------------------------
+
+  , { name: "cast-simple"
+    , query: emptyQuery
+        # select [ as (cast (col "id") "text") "id_text" ]
+        # from "users"
+    }
+
+  , { name: "cast-compound-operand"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_ (cast (binOp "+" (col "age") (int 1)) "numeric" .>= num 1.5)
+    }
+
+  -- Subqueries (Sub) ---------------------------------------------------------
+
+  , { name: "sub-scalar-correlated"
+    , query: emptyQuery
+        # select
+            [ expr (tcol "u" "id")
+            , as
+                ( sub
+                    ( emptyQuery
+                        # select [ expr countStar ]
+                        # from "orders"
+                        # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+                    )
+                )
+                "order_count"
+            ]
+        # fromAs "users" "u"
+    }
+
+  , { name: "sub-in"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_
+            ( inSub (col "id")
+                (emptyQuery # select [ expr (col "user_id") ] # from "orders")
+            )
+    }
+
+  , { name: "sub-not-in"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_
+            ( notInSub (col "id")
+                ( emptyQuery
+                    # select [ expr (col "user_id") ]
+                    # from "orders"
+                    # where_ (col "status" .== str "cancelled")
+                )
+            )
+    }
+
+  , { name: "sub-exists"
+    , query: emptyQuery
+        # select [ star ]
+        # fromAs "users" "u"
+        # where_
+            ( exists
+                ( emptyQuery
+                    # select [ expr (raw "1") ]
+                    # from "orders"
+                    # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+                )
+            )
+    }
+
+  , { name: "sub-not-exists"
+    , query: emptyQuery
+        # select [ star ]
+        # fromAs "users" "u"
+        # where_
+            ( notExists
+                ( emptyQuery
+                    # select [ expr (raw "1") ]
+                    # from "orders"
+                    # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+                )
+            )
+    }
+
+  -- Derived tables -----------------------------------------------------------
+
+  , { name: "derived-table"
+    , query: emptyQuery
+        # select [ starFrom "recent" ]
+        # fromSub
+            ( emptyQuery
+                # select (cols [ "id", "user_id", "total" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+            "recent"
+    }
+
+  , { name: "derived-table-aggregate"
+    , query: emptyQuery
+        # select [ expr (tcol "u" "name"), expr (tcol "totals" "order_count") ]
+        # fromAs "users" "u"
+        # joinOn InnerJoin
+            ( derived
+                ( emptyQuery
+                    # select [ expr (col "user_id"), as countStar "order_count" ]
+                    # from "orders"
+                    # groupBy [ col "user_id" ]
+                )
+                "totals"
+            )
+            (tcol "u" "id" .== tcol "totals" "user_id")
+    }
+
+  -- A derived table's parameters sit earlier in the SQL than the outer
+  -- WHERE's, so they must be numbered first.
+  , { name: "derived-table-parameter-ordering"
+    , query: emptyQuery
+        # select [ starFrom "recent" ]
+        # fromSub
+            ( emptyQuery
+                # select (cols [ "id", "user_id", "total" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+            "recent"
+        # where_ (tcol "recent" "total" .> int 100)
+    }
+
+  -- Subquery parameters must keep numbering in step with the outer query.
+  , { name: "sub-parameter-ordering"
+    , query: emptyQuery
+        # select [ star ]
+        # fromAs "users" "u"
+        # where_
+            ( and
+                [ tcol "u" "active" .== bool true
+                , exists
+                    ( emptyQuery
+                        # select [ expr (raw "1") ]
+                        # from "orders"
+                        # where_
+                            ( and
+                                [ tcol "orders" "user_id" .== tcol "u" "id"
+                                , tcol "orders" "status" .== str "paid"
+                                ]
+                            )
+                    )
+                , tcol "u" "age" .> int 21
+                ]
+            )
+    }
   ]
 
 -- ---------------------------------------------------------------------------
@@ -307,25 +496,23 @@ exprTags :: Expr -> Array String
 exprTags e = case e of
   Col { table } -> [ if isJust table then "Expr.Col.qualified" else "Expr.Col" ]
   Lit l -> [ "Expr.Lit", "Literal." <> literalTag l ]
-  Eq a b -> node "Expr.Eq" [ a, b ]
-  Neq a b -> node "Expr.Neq" [ a, b ]
-  Lt a b -> node "Expr.Lt" [ a, b ]
-  Lte a b -> node "Expr.Lte" [ a, b ]
-  Gt a b -> node "Expr.Gt" [ a, b ]
-  Gte a b -> node "Expr.Gte" [ a, b ]
+  App name args -> nodes [ "Expr.App", "Expr.App." <> name ] args
+  -- Tagged per operator as well as per node, so the ratchet still guarantees
+  -- each individual operator reaches PostgreSQL now that they share a
+  -- constructor.
+  BinOp op l r -> nodes [ "Expr.BinOp", "Expr.BinOp." <> op ] [ l, r ]
+  Unary op x -> nodes [ "Expr.Unary", "Expr.Unary." <> op ] [ x ]
+  Postfix op x -> nodes [ "Expr.Postfix", "Expr.Postfix." <> op ] [ x ]
+  Cast x _ -> node "Expr.Cast" [ x ]
+  Row xs -> node "Expr.Row" xs
+  Sub q -> "Expr.Sub" : queryTags q
   And xs -> node (if Array.null xs then "Expr.And.empty" else "Expr.And") xs
   Or xs -> node (if Array.null xs then "Expr.Or.empty" else "Expr.Or") xs
-  Not x -> node "Expr.Not" [ x ]
-  IsNull x -> node "Expr.IsNull" [ x ]
-  IsNotNull x -> node "Expr.IsNotNull" [ x ]
-  In x xs -> node "Expr.In" (x : xs)
-  NotIn x xs -> node "Expr.NotIn" (x : xs)
-  Like x p -> node "Expr.Like" [ x, p ]
-  ILike x p -> node "Expr.ILike" [ x, p ]
   Between x lo hi -> node "Expr.Between" [ x, lo, hi ]
   Raw _ -> [ "Expr.Raw" ]
   where
   node tag kids = tag : Array.concatMap exprTags kids
+  nodes tags kids = tags <> Array.concatMap exprTags kids
 
 literalTag :: Literal -> String
 literalTag = case _ of
@@ -358,9 +545,10 @@ orderTags :: OrderExpr -> Array String
 orderTags o = orderDirTag o.dir : exprTags o.expr
 
 relationTags :: String -> Relation -> Array String
-relationTags prefix r = case r.alias of
+relationTags prefix (Table _ alias) = case alias of
   Nothing -> [ prefix ]
   Just _ -> [ prefix, prefix <> ".alias" ]
+relationTags prefix (Derived q _) = (prefix <> ".derived") : queryTags q
 
 queryTags :: Query -> Array String
 queryTags q =
@@ -391,23 +579,38 @@ requiredTags = Array.sort
   [ "Expr.Col"
   , "Expr.Col.qualified"
   , "Expr.Lit"
-  , "Expr.Eq"
-  , "Expr.Neq"
-  , "Expr.Lt"
-  , "Expr.Lte"
-  , "Expr.Gt"
-  , "Expr.Gte"
+  , "Expr.App"
+  , "Expr.BinOp"
+  , "Expr.BinOp.="
+  , "Expr.BinOp.<>"
+  , "Expr.BinOp.<"
+  , "Expr.BinOp.<="
+  , "Expr.BinOp.>"
+  , "Expr.BinOp.>="
+  , "Expr.BinOp.IN"
+  , "Expr.BinOp.NOT IN"
+  , "Expr.BinOp.LIKE"
+  , "Expr.BinOp.ILIKE"
+  , "Expr.BinOp.NOT LIKE"
+  -- Arithmetic is required because it is the only thing that exercises the
+  -- precedence printer; without it a parenthesisation bug ships unnoticed.
+  , "Expr.BinOp.+"
+  , "Expr.BinOp.*"
+  , "Expr.BinOp.||"
+  , "Expr.Unary"
+  , "Expr.Unary.NOT"
+  , "Expr.Unary.EXISTS"
+  , "Expr.Unary.NOT EXISTS"
+  , "Expr.Postfix"
+  , "Expr.Postfix.IS NULL"
+  , "Expr.Postfix.IS NOT NULL"
+  , "Expr.Cast"
+  , "Expr.Row"
+  , "Expr.Sub"
   , "Expr.And"
   , "Expr.And.empty"
   , "Expr.Or"
   , "Expr.Or.empty"
-  , "Expr.Not"
-  , "Expr.IsNull"
-  , "Expr.IsNotNull"
-  , "Expr.In"
-  , "Expr.NotIn"
-  , "Expr.Like"
-  , "Expr.ILike"
   , "Expr.Between"
   , "Expr.Raw"
   , "Literal.LitInt"
@@ -429,6 +632,8 @@ requiredTags = Array.sort
   , "Query.from.alias"
   , "Query.join"
   , "Query.join.alias"
+  , "Query.join.derived"
+  , "Query.from.derived"
   , "Query.where"
   , "Query.groupBy"
   , "Query.having"
