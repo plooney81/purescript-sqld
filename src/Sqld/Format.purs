@@ -1,7 +1,7 @@
 module Sqld.Format where
 
 import Prelude
-import Data.Array (filter, mapWithIndex, reverse) as Array
+import Data.Array (elem, filter, mapWithIndex, reverse) as Array
 import Data.Foldable (foldl, intercalate)
 import Data.Maybe (Maybe(..), maybe)
 import Data.String as String
@@ -172,6 +172,47 @@ formatOffset Nothing  = mempty
 formatOffset (Just n) = "OFFSET " <> show n
 
 -- ---------------------------------------------------------------------------
+-- Operator precedence
+-- ---------------------------------------------------------------------------
+--
+-- Mirrors PostgreSQL's precedence table so the printer emits parentheses only
+-- where they change meaning. Higher binds tighter.
+--
+-- `And` and `Or` are deliberately absent: they parenthesise themselves, so as
+-- far as the surrounding expression is concerned they are atoms. `Raw` is an
+-- atom too — its contents are opaque, so its parenthesisation is the caller's
+-- responsibility.
+
+atomPrec :: Int
+atomPrec = 99
+
+precOf :: Expr -> Int
+precOf (BinOp op _ _)  = opPrec op
+precOf (Unary op _)    = unaryPrec op
+precOf (Postfix _ _)   = 4
+precOf (Cast _ _)      = 12
+precOf (Between _ _ _) = 6
+precOf _               = atomPrec
+
+opPrec :: String -> Int
+opPrec op
+  | Array.elem op [ "=", "<>", "<", ">", "<=", ">=" ] = 5
+  | Array.elem op [ "IN", "NOT IN", "LIKE", "ILIKE", "NOT LIKE", "NOT ILIKE", "SIMILAR TO" ] = 6
+  | Array.elem op [ "+", "-" ] = 8
+  | Array.elem op [ "*", "/", "%" ] = 9
+  | op == "^" = 10
+  -- PostgreSQL groups every other operator at a single level between the
+  -- pattern operators and arithmetic, which is where user-supplied operators
+  -- such as `@>` and `->>` land.
+  | otherwise = 7
+
+unaryPrec :: String -> Int
+unaryPrec op
+  | op == "NOT" = 3
+  | Array.elem op [ "EXISTS", "NOT EXISTS" ] = 4
+  | otherwise = 11
+
+-- ---------------------------------------------------------------------------
 -- Expression formatter — recursive, left-to-right param numbering
 -- ---------------------------------------------------------------------------
 
@@ -183,12 +224,33 @@ formatExpr (Col { table: Just t, column }) state =
 formatExpr (Lit literal) state =
   let idx = state.counter + 1
   in Tuple ("$" <> show idx) { params: state.params <> [literal], counter: idx }
-formatExpr (Eq  l r) state = formatBinOp "="  l r state
-formatExpr (Neq l r) state = formatBinOp "<>" l r state
-formatExpr (Lt  l r) state = formatBinOp "<"  l r state
-formatExpr (Lte l r) state = formatBinOp "<=" l r state
-formatExpr (Gt  l r) state = formatBinOp ">"  l r state
-formatExpr (Gte l r) state = formatBinOp ">=" l r state
+formatExpr (App name args) state =
+  let Tuple parts s' = mapAccum formatExpr state args
+  in Tuple (name <> "(" <> intercalate ", " parts <> ")") s'
+formatExpr (BinOp op l r) state =
+  let
+    prec = opPrec op
+    Tuple lSql s1 = formatChild prec l state
+    -- Left-associative: an equal-precedence right operand needs bracketing.
+    Tuple rSql s2 = formatChild (prec + 1) r s1
+  in Tuple (lSql <> " " <> op <> " " <> rSql) s2
+formatExpr (Unary op e) state =
+  let Tuple sql s' = formatChild (unaryPrec op) e state
+  in Tuple (op <> " " <> sql) s'
+formatExpr (Postfix op e) state =
+  let Tuple sql s' = formatChild 4 e state
+  in Tuple (sql <> " " <> op) s'
+formatExpr (Cast e ty) state =
+  let Tuple sql s' = formatChild 12 e state
+  in Tuple (sql <> "::" <> ty) s'
+formatExpr (Row exprs) state =
+  let Tuple parts s' = mapAccum formatExpr state exprs
+  in Tuple ("(" <> intercalate ", " parts <> ")") s'
+formatExpr (Sub q) state =
+  -- Subqueries render on one line regardless of the outer separator: a nested
+  -- SELECT reads better inline than broken across the parent's clauses.
+  let Tuple sql s' = formatQuery " " q state
+  in Tuple ("(" <> sql <> ")") s'
 formatExpr (And [])    state = Tuple "TRUE"  state
 formatExpr (And exprs) state =
   let Tuple parts s' = mapAccum formatExpr state exprs
@@ -197,40 +259,11 @@ formatExpr (Or [])    state = Tuple "FALSE" state
 formatExpr (Or exprs) state =
   let Tuple parts s' = mapAccum formatExpr state exprs
   in Tuple ("(" <> intercalate " OR " parts <> ")") s'
-formatExpr (Not e) state =
-  let Tuple sql s' = formatExpr e state
-  in Tuple ("NOT " <> sql) s'
-formatExpr (IsNull e) state =
-  let Tuple sql s' = formatExpr e state
-  in Tuple (sql <> " IS NULL") s'
-formatExpr (IsNotNull e) state =
-  let Tuple sql s' = formatExpr e state
-  in Tuple (sql <> " IS NOT NULL") s'
-formatExpr (In e vals) state =
-  let
-    Tuple exprSql s1 = formatExpr e state
-    Tuple parts   s2 = mapAccum formatExpr s1 vals
-  in Tuple (exprSql <> " IN (" <> intercalate ", " parts <> ")") s2
-formatExpr (NotIn e vals) state =
-  let
-    Tuple exprSql s1 = formatExpr e state
-    Tuple parts   s2 = mapAccum formatExpr s1 vals
-  in Tuple (exprSql <> " NOT IN (" <> intercalate ", " parts <> ")") s2
-formatExpr (Like e pat) state =
-  let
-    Tuple lSql s1 = formatExpr e state
-    Tuple rSql s2 = formatExpr pat s1
-  in Tuple (lSql <> " LIKE " <> rSql) s2
-formatExpr (ILike e pat) state =
-  let
-    Tuple lSql s1 = formatExpr e state
-    Tuple rSql s2 = formatExpr pat s1
-  in Tuple (lSql <> " ILIKE " <> rSql) s2
 formatExpr (Between e lo hi) state =
   let
-    Tuple eSql  s1 = formatExpr e   state
-    Tuple loSql s2 = formatExpr lo  s1
-    Tuple hiSql s3 = formatExpr hi  s2
+    Tuple eSql  s1 = formatChild 7 e  state
+    Tuple loSql s2 = formatChild 7 lo s1
+    Tuple hiSql s3 = formatChild 7 hi s2
   in Tuple (eSql <> " BETWEEN " <> loSql <> " AND " <> hiSql) s3
 formatExpr (Raw sql) state = Tuple sql state
 
@@ -238,12 +271,12 @@ formatExpr (Raw sql) state = Tuple sql state
 -- Helpers
 -- ---------------------------------------------------------------------------
 
-formatBinOp :: String -> Expr -> Expr -> WithBindings String
-formatBinOp op l r state =
-  let
-    Tuple lSql s1 = formatExpr l state
-    Tuple rSql s2 = formatExpr r s1
-  in Tuple (lSql <> " " <> op <> " " <> rSql) s2
+-- | Formats a sub-expression, parenthesising it only if it binds more loosely
+-- | than its position allows.
+formatChild :: Int -> Expr -> WithBindings String
+formatChild minPrec e state =
+  let Tuple sql s' = formatExpr e state
+  in Tuple (if precOf e < minPrec then "(" <> sql <> ")" else sql) s'
 
 mapAccum :: ∀ a. (a -> WithBindings String) -> Bindings -> Array a -> Tuple (Array String) Bindings
 mapAccum f s0 xs = foldl step (Tuple [] s0) xs

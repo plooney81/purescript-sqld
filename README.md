@@ -59,9 +59,9 @@ await pool.query(query.sql, query.params);
 | Module | Contents |
 |---|---|
 | `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `emptyQuery` |
-| `Sqld.Expr` | Expression constructors, literals, operators, logical combinators |
+| `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
-| `Sqld.Format` | `format` and `formatInline` |
+| `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
 
 ## API
 
@@ -118,7 +118,50 @@ From `Sqld.Expr`:
 | `in_ :: Expr -> Array Expr -> Expr` | `in_ (col "id") [int 1, int 2]` | `"id" IN ($1, $2)` |
 | `notIn` | `notIn (col "s") [str "x"]` | `"s" NOT IN ($1)` |
 | `between` | `between (col "n") (int 1) (int 10)` | `"n" BETWEEN $1 AND $2` |
-| `like` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
+| `like / ilike` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
+| `notLike / notILike` | `notLike (col "email") "%@spam.com"` | `"email" NOT LIKE $1` |
+
+### Generic nodes
+
+The AST keeps only a handful of expression constructors. `App`, `BinOp`, `Cast`
+and `Sub` cover most of PostgreSQL's expression grammar between them, so a
+feature usually needs no new AST node — and anything without a named helper is
+still reachable without falling back to `raw`:
+
+| Constructor | Example | SQL |
+|---|---|---|
+| `app :: String -> Array Expr -> Expr` | `app "LOWER" [col "email"]` | `LOWER("email")` |
+| `binOp :: String -> Expr -> Expr -> Expr` | `binOp "@>" (col "tags") (raw "ARRAY['a']")` | `"tags" @> ARRAY['a']` |
+| `unary :: String -> Expr -> Expr` | `unary "-" (col "n")` | `- "n"` |
+| `postfix :: String -> Expr -> Expr` | `postfix "IS TRUE" (col "ok")` | `"ok" IS TRUE` |
+| `cast :: Expr -> String -> Expr` | `cast (col "id") "text"` | `"id"::text` |
+| `row :: Array Expr -> Expr` | `row [int 1, int 2]` | `(1, 2)` |
+| `sub :: Query -> Expr` | `sub totals` | `(SELECT …)` |
+| `exists / notExists` | `exists orders` | `EXISTS (SELECT …)` |
+| `inSub / notInSub` | `inSub (col "id") orders` | `"id" IN (SELECT …)` |
+
+Common aggregates and functions are provided as one-line wrappers over `app`:
+`count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`,
+`upper`.
+
+### Operator precedence
+
+`format` follows PostgreSQL's precedence table and brackets only where the
+meaning depends on it:
+
+```purescript
+binOp "*" (binOp "+" (col "age") (int 1)) (int 2)
+-- ("age" + 1) * 2      -- bracketed: + binds looser than *
+
+binOp "+" (col "a") (binOp "*" (col "b") (int 2))
+-- "a" + "b" * 2        -- not bracketed: precedence already agrees
+
+binOp "-" (col "a") (binOp "-" (col "b") (col "c"))
+-- "a" - ("b" - "c")    -- bracketed: operators are left-associative
+```
+
+`raw` is exempt — its contents are opaque, so its bracketing is yours to get
+right.
 
 ### ORDER BY
 

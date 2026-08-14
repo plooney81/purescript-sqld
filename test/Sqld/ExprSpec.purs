@@ -1,10 +1,10 @@
 module Test.Sqld.ExprSpec where
 
 import Prelude (Unit, discard, (#))
-import Sqld.Core (emptyQuery)
-import Sqld.Expr (and, between, bool, col, in_, int, isNotNull, isNull, like, not, notIn, or, raw, str, (.!=), (.==), (.>), (.>=))
-import Sqld.Format (formatInline)
-import Sqld.Select (from, select, star, where_)
+import Sqld.Core (Literal(..), emptyQuery)
+import Sqld.Expr (and, between, binOp, bool, cast, coalesce, col, count, countStar, exists, in_, inSub, int, isNotNull, isNull, like, not, notIn, or, raw, str, sub, upper, (.!=), (.==), (.>), (.>=))
+import Sqld.Format (format, formatInline)
+import Sqld.Select (as, expr, from, select, star, where_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -169,3 +169,126 @@ exprSpec = describe "Sqld.Expr" do
             # where_ (like (col "email") "%@example.com")
             # formatInline
       query `shouldEqual` "SELECT * FROM \"users\" WHERE \"email\" LIKE '%@example.com'"
+
+  describe "function application" do
+    it "COUNT(*)" do
+      let query = emptyQuery
+            # select [as countStar "n"]
+            # from "t"
+            # formatInline
+      query `shouldEqual` "SELECT COUNT(*) AS \"n\" FROM \"t\""
+
+    it "function of a column" do
+      let query = emptyQuery
+            # select [expr (count (col "id"))]
+            # from "t"
+            # formatInline
+      query `shouldEqual` "SELECT COUNT(\"id\") FROM \"t\""
+
+    it "nested application with multiple arguments" do
+      let query = emptyQuery
+            # select [as (upper (coalesce [col "email", str "none"])) "e"]
+            # from "t"
+            # formatInline
+      query `shouldEqual` "SELECT UPPER(COALESCE(\"email\", 'none')) AS \"e\" FROM \"t\""
+
+  describe "operator precedence" do
+    -- The parentheses below are the whole point: PostgreSQL accepts both
+    -- "age" + 1 * 2 and ("age" + 1) * 2, and they mean different things.
+    it "brackets a looser-binding left operand" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_ (binOp "*" (binOp "+" (col "age") (int 1)) (int 2) .> int 10)
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE (\"age\" + 1) * 2 > 10"
+
+    it "omits brackets when precedence already agrees" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_ (binOp "+" (col "a") (binOp "*" (col "b") (int 2)) .> int 3)
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE \"a\" + \"b\" * 2 > 3"
+
+    -- Left-associativity: a - (b - c) is not a - b - c.
+    it "brackets an equal-precedence right operand" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_ (binOp "-" (col "a") (binOp "-" (col "b") (col "c")) .> int 0)
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE \"a\" - (\"b\" - \"c\") > 0"
+
+    it "treats an unknown operator as a generic one" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_ (binOp "@>" (col "tags") (raw "ARRAY['a']"))
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE \"tags\" @> ARRAY['a']"
+
+  describe "casts" do
+    it "atom operand needs no brackets" do
+      let query = emptyQuery
+            # select [as (cast (col "id") "text") "id_text"]
+            # from "t"
+            # formatInline
+      query `shouldEqual` "SELECT \"id\"::text AS \"id_text\" FROM \"t\""
+
+    it "compound operand is bracketed" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_ (cast (binOp "+" (col "age") (int 1)) "numeric" .> int 2)
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE (\"age\" + 1)::numeric > 2"
+
+  describe "subqueries" do
+    it "scalar subquery in the select list" do
+      let orders = emptyQuery # select [expr countStar] # from "orders"
+          query = emptyQuery
+            # select [expr (col "id"), as (sub orders) "n"]
+            # from "users"
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"id\", (SELECT COUNT(*) FROM \"orders\") AS \"n\" FROM \"users\""
+
+    it "IN with a subquery" do
+      let orders = emptyQuery # select [expr (col "user_id")] # from "orders"
+          query = emptyQuery
+            # select [star]
+            # from "users"
+            # where_ (inSub (col "id") orders)
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" WHERE \"id\" IN (SELECT \"user_id\" FROM \"orders\")"
+
+    it "EXISTS" do
+      let orders = emptyQuery # select [expr (raw "1")] # from "orders"
+          query = emptyQuery
+            # select [star]
+            # from "users"
+            # where_ (exists orders)
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" WHERE EXISTS (SELECT 1 FROM \"orders\")"
+
+    -- A subquery must not restart parameter numbering, or the driver receives
+    -- the bindings in the wrong order.
+    it "parameters interleave with the outer query" do
+      let orders = emptyQuery
+            # select [expr (col "user_id")]
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+          result = emptyQuery
+            # select [star]
+            # from "users"
+            # where_ (and [ col "active" .== bool true
+                          , inSub (col "id") orders
+                          , col "age" .> int 21
+                          ])
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"users\" WHERE (\"active\" = $1 AND \"id\" IN (SELECT \"user_id\" FROM \"orders\" WHERE \"status\" = $2) AND \"age\" > $3)"
+      result.params `shouldEqual` [LitBoolean true, LitString "paid", LitInt 21]
