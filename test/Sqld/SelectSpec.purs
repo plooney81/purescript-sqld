@@ -75,6 +75,28 @@ selectSpec = describe "Sqld.Select" do
             # formatInline
       query `shouldEqual` "SELECT \"dept\", COUNT(*) AS \"n\" FROM \"t\""
 
+  describe "select'" do
+    it "starts a query without naming emptyQuery" do
+      let query = select' (cols ["id", "name"])
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # formatInline
+      query `shouldEqual` "SELECT \"id\", \"name\" FROM \"users\" WHERE \"active\" = TRUE"
+
+    it "stays additive, so later select calls append" do
+      let query = select' (cols ["department"])
+            # select [as countStar "headcount"]
+            # from "users"
+            # groupBy [col "department"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"department\", COUNT(*) AS \"headcount\" FROM \"users\" GROUP BY \"department\""
+
+    it "matches the emptyQuery form exactly" do
+      let viaHelper = select' (cols ["id"]) # from "users" # formatInline
+          viaEmpty  = emptyQuery # select (cols ["id"]) # from "users" # formatInline
+      viaHelper `shouldEqual` viaEmpty
+
   describe "mixed select lists" do
     it "concatenates plain columns with aliased expressions" do
       let query = emptyQuery

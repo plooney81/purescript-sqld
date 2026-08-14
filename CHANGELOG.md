@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `fromRel :: Relation -> Query -> Query` — the general FROM form
 - `starFrom :: String -> SelectExpr` — `"t".*`, previously documented in the README but never implemented
 - `tcols :: String -> Array String -> Array SelectExpr` — columns sharing one table qualifier
+- `select' :: Array SelectExpr -> Query` — starts a query from its select list, so the common case need not name `emptyQuery`. `select` stays additive, so later calls append. Use `emptyQuery` directly for reusable `Query -> Query` fragments, or a query with no select list of its own
 - `exprs :: Array Expr -> Array SelectExpr` — the plural of `expr`, for a run of bare expressions. Mixed select lists concatenate: `cols ["department"] <> [as countStar "headcount"]`. `SelectExpr` stays distinct from `Expr` on purpose — it is what keeps `as` and `star` from type-checking in a `WHERE` clause
 - `notLike` / `notILike`
 - Function wrappers over `app`: `count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`, `upper`

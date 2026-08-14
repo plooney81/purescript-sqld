@@ -46,8 +46,7 @@ SQL string — they become numbered parameters, so there is nothing to escape.
 ```purescript
 basicFiltering :: Query
 basicFiltering =
-  emptyQuery
-    # select (cols [ "id", "name", "email" ])
+  select' (cols [ "id", "name", "email" ])
     # from "users"
     # where_ (col "active" .== bool true)
 ```
@@ -72,8 +71,7 @@ what the structure says. Calling `where_` twice ANDs rather than replaces.
 ```purescript
 combiningConditions :: Query
 combiningConditions =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # from "users"
     # where_
         ( and
@@ -104,8 +102,7 @@ is never true in SQL. `coalesce` supplies a fallback.
 ```purescript
 nullHandling :: Query
 nullHandling =
-  emptyQuery
-    # select (cols [ "id" ] <> [ as (coalesce [ col "email", str "(none)" ]) "email" ])
+  select' (cols [ "id" ] <> [ as (coalesce [ col "email", str "(none)" ]) "email" ])
     # from "users"
     # where_ (and [ isNotNull (col "name"), isNull (col "department") ])
 ```
@@ -129,8 +126,7 @@ Bound parameters: `$1` = `"(none)"`
 ```purescript
 patternMatching :: Query
 patternMatching =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # from "users"
     # where_
         ( and
@@ -164,8 +160,7 @@ keeps a select list close to the SQL it produces.
 ```purescript
 joins :: Query
 joins =
-  emptyQuery
-    # select (cols [ "u.name", "p.bio" ])
+  select' (cols [ "u.name", "p.bio" ])
     # fromAs "users" "u"
     # leftJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
     # innerJoinAs "orders" "o" (and [ col "u.id" .== col "o.user_id", col "o.status" .== str "paid" ])
@@ -192,8 +187,7 @@ of one relation.
 ```purescript
 rightJoinExample :: Query
 rightJoinExample =
-  emptyQuery
-    # select [ starFrom "profiles" ]
+  select' [ starFrom "profiles" ]
     # from "users"
     # rightJoin "profiles" (col "users.id" .== col "profiles.user_id")
 ```
@@ -215,8 +209,7 @@ Keeps unmatched rows from both sides.
 ```purescript
 fullJoinExample :: Query
 fullJoinExample =
-  emptyQuery
-    # select (cols [ "u.name", "p.bio" ])
+  select' (cols [ "u.name", "p.bio" ])
     # fromAs "users" "u"
     # fullJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
 ```
@@ -239,14 +232,13 @@ alias works exactly as it does in SQL.
 ```purescript
 aggregation :: Query
 aggregation =
-  emptyQuery
-    # select
-        ( cols [ "department" ] <>
-            [ as countStar "headcount"
-            , as (count (col "email")) "with_email"
-            , as (avg (col "age")) "mean_age"
-            ]
-        )
+  select'
+    ( cols [ "department" ] <>
+        [ as countStar "headcount"
+        , as (count (col "email")) "with_email"
+        , as (avg (col "age")) "mean_age"
+        ]
+    )
     # from "users"
     # where_ (col "active" .== bool true)
     # groupBy [ col "department" ]
@@ -278,11 +270,10 @@ Brackets appear only where precedence demands them.
 ```purescript
 functionsAndCasts :: Query
 functionsAndCasts =
-  emptyQuery
-    # select
-        [ as (binOp "||" (col "name") (col "department")) "label"
-        , as (cast (col "id") "text") "id_text"
-        ]
+  select'
+    [ as (binOp "||" (col "name") (col "department")) "label"
+    , as (cast (col "id") "text") "id_text"
+    ]
     # from "users"
     # where_ (binOp "*" (binOp "+" (col "age") (int 1)) (int 2) .> int 40)
 ```
@@ -307,13 +298,11 @@ without joining and de-duplicating.
 ```purescript
 existsExample :: Query
 existsExample =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # fromAs "users" "u"
     # where_
         ( exists
-            ( emptyQuery
-                # select [ expr (raw "1") ]
+            ( select' [ expr (raw "1") ]
                 # from "orders"
                 # where_ (and [ col "orders.user_id" .== col "u.id", col "orders.status" .== str "paid" ])
             )
@@ -340,13 +329,11 @@ never ordered.
 ```purescript
 notExistsExample :: Query
 notExistsExample =
-  emptyQuery
-    # select (tcols "u" [ "id", "name" ])
+  select' (tcols "u" [ "id", "name" ])
     # fromAs "users" "u"
     # where_
         ( notExists
-            ( emptyQuery
-                # select [ expr (raw "1") ]
+            ( select' [ expr (raw "1") ]
                 # from "orders"
                 # where_ (col "orders.user_id" .== col "u.id")
             )
@@ -371,13 +358,11 @@ numbered in step with the outer query.
 ```purescript
 subqueryIn :: Query
 subqueryIn =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # from "users"
     # where_
         ( inSub (col "id")
-            ( emptyQuery
-                # select (cols [ "user_id" ])
+            ( select' (cols [ "user_id" ])
                 # from "orders"
                 # where_ (col "total" .> num 100.0)
             )
@@ -403,20 +388,18 @@ A subquery in the select list, correlated against the outer row.
 ```purescript
 scalarSubquery :: Query
 scalarSubquery =
-  emptyQuery
-    # select
-        ( cols [ "u.name" ] <>
-            [ as
-                ( sub
-                    ( emptyQuery
-                        # select (exprs [ countStar ])
-                        # from "orders"
-                        # where_ (col "orders.user_id" .== col "u.id")
-                    )
+  select'
+    ( cols [ "u.name" ] <>
+        [ as
+            ( sub
+                ( select' (exprs [ countStar ])
+                    # from "orders"
+                    # where_ (col "orders.user_id" .== col "u.id")
                 )
-                "order_count"
-            ]
-        )
+            )
+            "order_count"
+        ]
+    )
     # fromAs "users" "u"
 ```
 
@@ -438,11 +421,9 @@ inside the subquery are numbered before the outer query's.
 ```purescript
 derivedTable :: Query
 derivedTable =
-  emptyQuery
-    # select [ starFrom "paid" ]
+  select' [ starFrom "paid" ]
     # fromSub
-        ( emptyQuery
-            # select (cols [ "id", "user_id", "total" ])
+        ( select' (cols [ "id", "user_id", "total" ])
             # from "orders"
             # where_ (col "status" .== str "paid")
         )
@@ -470,13 +451,11 @@ here, per-user totals computed once and joined back.
 ```purescript
 derivedTableJoin :: Query
 derivedTableJoin =
-  emptyQuery
-    # select (cols [ "u.name", "totals.order_count" ])
+  select' (cols [ "u.name", "totals.order_count" ])
     # fromAs "users" "u"
     # joinOn InnerJoin
         ( derived
-            ( emptyQuery
-                # select (cols [ "user_id" ] <> [ as countStar "order_count" ])
+            ( select' (cols [ "user_id" ] <> [ as countStar "order_count" ])
                 # from "orders"
                 # groupBy [ col "user_id" ]
             )
@@ -506,8 +485,7 @@ paginate pageSize page = limit pageSize >>> offset (pageSize * page)
 
 pagination :: Query
 pagination =
-  emptyQuery
-    # select (cols [ "id", "title" ])
+  select' (cols [ "id", "title" ])
     # from "articles"
     # where_ (isNotNull (col "published_at"))
     # orderBy [ desc (col "published_at"), asc (col "id") ]
@@ -585,7 +563,7 @@ WHERE clauses are ANDed; joins concatenate; scalars take the right-hand side.
 mergingQueries :: Query
 mergingQueries =
   mergeQueries
-    (emptyQuery # select [ star ] # from "users" # where_ (col "active" .== bool true))
+    (select' [ star ] # from "users" # where_ (col "active" .== bool true))
     (emptyQuery # where_ (col "age" .< int 30) # limit 10)
 ```
 
@@ -611,8 +589,7 @@ input. Reach for `app` and `binOp` first.
 ```purescript
 rawEscapeHatch :: Query
 rawEscapeHatch =
-  emptyQuery
-    # select [ colAs "id" "id", as (raw "date_trunc('month', \"created_at\")") "month" ]
+  select' [ colAs "id" "id", as (raw "date_trunc('month', \"created_at\")") "month" ]
     # from "users"
     # where_ (raw "\"created_at\" > NOW() - INTERVAL '30 days'")
 ```

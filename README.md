@@ -83,6 +83,7 @@ Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
 | Function | Description |
 |---|---|
 | `select :: Array SelectExpr -> Query -> Query` | Append to the SELECT list |
+| `select' :: Array SelectExpr -> Query` | Start a query from its select list, without naming `emptyQuery` |
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
 | `fromSub :: Query -> String -> Query -> Query` | FROM a derived table (subquery + alias) |
@@ -127,8 +128,7 @@ select (cols ["department"] <> [as countStar "headcount"])
 a fragment contributes columns of its own:
 
 ```purescript
-emptyQuery
-  # select (cols ["department"])
+select' (cols ["department"])
   # select [as countStar "headcount"]
 ```
 
