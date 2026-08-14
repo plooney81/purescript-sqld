@@ -4,3 +4,4 @@ node_modules/
 .psci_modules/
 .psc-ide-port
 .purs-repl
+test-artifacts/

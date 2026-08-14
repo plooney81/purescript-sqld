@@ -160,6 +160,69 @@ adminFilter = emptyQuery # where_ (col "role" .== str "admin")
 result = format (mergeQueries baseUsers adminFilter)
 ```
 
+## Testing
+
+`make help` lists every development target. The common ones:
+
+```
+make test            # golden tests; also emits test-artifacts/corpus.json
+make validate        # tests + validate every query against real PostgreSQL
+make validate-fast   # validate only, reusing the corpus and a warm container
+```
+
+### PostgreSQL validation
+
+Golden tests prove sqld emits the string we expected. They do not prove
+PostgreSQL accepts it. A second harness closes that gap by replaying every
+corpus query against a real server.
+
+`make validate` starts a throwaway Postgres container, runs `spago test`, then
+feeds each query to the server with `PREPARE`. Because `PREPARE` runs full parse
+*analysis* — not just a syntax check — the harness catches bad syntax, unknown
+columns, invalid `GROUP BY`, and operator type mismatches. Both formatter
+outputs are validated: the parameterised form from `format` and the debug form
+from `formatInline`.
+
+The container is left running between invocations, so `make validate-fast` is
+the quick inner loop. `make pg-stop` tears it down.
+
+To narrow a run, or to probe a query without adding a corpus entry:
+
+```
+make list                                    # corpus entry names
+make validate-fast ONLY=join                 # just the entries matching "join"
+make sql SQL='SELECT "u".* FROM "users" AS "u"'   # ad-hoc query
+```
+
+`make sql` is the fastest way to answer "will PostgreSQL accept this?" while
+working on a formatter change.
+
+Against an existing server, skip the Makefile and drive the validator directly:
+
+```
+DATABASE_URL=postgres://user:pass@host:5432/sqld_validate node scripts/validate-sql.mjs
+```
+
+It accepts the same `--only`, `--sql` and `--list` flags; `--help` lists them.
+
+The schema in `test/fixtures/schema.sql` drops and recreates `public`, so the
+validator refuses to run unless the database name looks disposable. Override
+with `SQLD_ALLOW_ANY_DB=1` only if you are certain.
+
+The same steps run in CI on every push and pull request.
+
+### Coverage
+
+`test/Sqld/Corpus.purs` is the single corpus both harnesses consume. Each entry
+is tagged with the AST constructors it exercises, and `Test.Sqld.CorpusSpec`
+fails if any constructor in `Sqld.Core` has no entry — so a new feature cannot
+ship without SQL that PostgreSQL has actually accepted. Adding a constructor
+makes the tagging functions non-exhaustive, which the compiler reports, and the
+new tag then fails the coverage assertion until a corpus entry exists.
+
+Every table and column the corpus references must exist in
+`test/fixtures/schema.sql`.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

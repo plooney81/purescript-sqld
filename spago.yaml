@@ -23,6 +23,8 @@ package:
       - aff
       - console
       - effect
+      - node-buffer
+      - node-fs
       - spec
 
 workspace:
