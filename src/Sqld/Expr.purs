@@ -138,40 +138,40 @@ isNotNull = Postfix "IS NOT NULL"
 -- ---------------------------------------------------------------------------
 
 in_ :: Expr -> Array Expr -> Expr
-in_ e vals = BinOp "IN" e (Row vals)
+in_ e = BinOp "IN" e <<< Row
 
 notIn :: Expr -> Array Expr -> Expr
-notIn e vals = BinOp "NOT IN" e (Row vals)
+notIn e = BinOp "NOT IN" e <<< Row
 
 -- | `e IN (SELECT …)`.
 inSub :: Expr -> Query -> Expr
-inSub e q = BinOp "IN" e (Sub q)
+inSub e = BinOp "IN" e <<< Sub
 
 -- | `e NOT IN (SELECT …)`.
 notInSub :: Expr -> Query -> Expr
-notInSub e q = BinOp "NOT IN" e (Sub q)
+notInSub e = BinOp "NOT IN" e <<< Sub
 
 exists :: Query -> Expr
-exists q = Unary "EXISTS" (Sub q)
+exists = Unary "EXISTS" <<< Sub
 
 notExists :: Query -> Expr
-notExists q = Unary "NOT EXISTS" (Sub q)
+notExists = Unary "NOT EXISTS" <<< Sub
 
 -- ---------------------------------------------------------------------------
 -- Pattern matching
 -- ---------------------------------------------------------------------------
 
 like :: Expr -> String -> Expr
-like e pattern = BinOp "LIKE" e (str pattern)
+like e = BinOp "LIKE" e <<< str
 
 ilike :: Expr -> String -> Expr
-ilike e pattern = BinOp "ILIKE" e (str pattern)
+ilike e = BinOp "ILIKE" e <<< str
 
 notLike :: Expr -> String -> Expr
-notLike e pattern = BinOp "NOT LIKE" e (str pattern)
+notLike e = BinOp "NOT LIKE" e <<< str
 
 notILike :: Expr -> String -> Expr
-notILike e pattern = BinOp "NOT ILIKE" e (str pattern)
+notILike e = BinOp "NOT ILIKE" e <<< str
 
 -- ---------------------------------------------------------------------------
 -- Ranges

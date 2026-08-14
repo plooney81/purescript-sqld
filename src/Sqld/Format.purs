@@ -27,9 +27,9 @@ type WithBindings a = Bindings -> Tuple a Bindings
 -- ---------------------------------------------------------------------------
 
 format :: Query -> FormattedQuery
-format q =
-  let Tuple sql state = formatQuery " " q emptyBindings
-  in { sql, params: state.params }
+format q = { sql, params: state.params }
+  where
+  Tuple sql state = formatQuery " " q emptyBindings
 
 -- | Inline all literals directly into the SQL string, single line.
 -- | Intended for debugging and logging only — never pass user input through this.
@@ -42,17 +42,18 @@ formatPretty :: Query -> String
 formatPretty = inlineWith "\n"
 
 inlineWith :: String -> Query -> String
-inlineWith sep q =
-  let Tuple sql state = formatQuery sep q emptyBindings
-      -- Substitute from highest index first so $10 isn't clobbered by $1
-      subs = Array.reverse (Array.mapWithIndex (\i l -> Tuple (i + 1) l) state.params)
-  in foldl
-       (\acc (Tuple i l) -> String.replaceAll
-         (String.Pattern ("$" <> show i))
-         (String.Replacement (inlineLiteral l))
-         acc)
-       sql
-       subs
+inlineWith sep q = foldl substitute sql subs
+  where
+  Tuple sql state = formatQuery sep q emptyBindings
+
+  -- Substitute from highest index first so $10 isn't clobbered by $1
+  subs = Array.reverse (Array.mapWithIndex (\i l -> Tuple (i + 1) l) state.params)
+
+  substitute acc (Tuple i l) =
+    String.replaceAll
+      (String.Pattern ("$" <> show i))
+      (String.Replacement (inlineLiteral l))
+      acc
 
 inlineLiteral :: Literal -> String
 inlineLiteral (LitInt n)     = show n
@@ -66,32 +67,33 @@ inlineLiteral LitNull        = "NULL"
 -- ---------------------------------------------------------------------------
 
 formatQuery :: String -> Query -> WithBindings String
-formatQuery sep q state0 =
-  let
-    Tuple selectSql  s1 = formatSelect  q.select  state0
-    Tuple fromSql    s2 = formatFrom    q.from    s1
-    Tuple joinsSql   s3 = formatJoins   sep q.joins s2
-    Tuple whereSql   s4 = formatWhere   q.where_  s3
-    Tuple groupBySql s5 = formatGroupBy q.groupBy s4
-    Tuple havingSql  s6 = formatHaving  q.having  s5
-    Tuple orderBySql s7 = formatOrderBy q.orderBy s6
-    limitSql             = formatLimit  q.limit
-    offsetSql            = formatOffset q.offset
-    parts = Array.filter (_ /= mempty)
-      [ selectSql, fromSql, joinsSql, whereSql
-      , groupBySql, havingSql, orderBySql, limitSql, offsetSql ]
-    sql = intercalate sep parts
-  in
-    Tuple sql s7
+formatQuery sep q state0 = Tuple sql s7
+  where
+  Tuple selectSql  s1 = formatSelect  q.select    state0
+  Tuple fromSql    s2 = formatFrom    q.from      s1
+  Tuple joinsSql   s3 = formatJoins   sep q.joins s2
+  Tuple whereSql   s4 = formatWhere   q.where_    s3
+  Tuple groupBySql s5 = formatGroupBy q.groupBy   s4
+  Tuple havingSql  s6 = formatHaving  q.having    s5
+  Tuple orderBySql s7 = formatOrderBy q.orderBy   s6
+
+  limitSql  = formatLimit  q.limit
+  offsetSql = formatOffset q.offset
+
+  parts = Array.filter (_ /= mempty)
+    [ selectSql, fromSql, joinsSql, whereSql
+    , groupBySql, havingSql, orderBySql, limitSql, offsetSql ]
+
+  sql = intercalate sep parts
 
 -- ---------------------------------------------------------------------------
 -- Clause formatters
 -- ---------------------------------------------------------------------------
 
 formatSelect :: Array SelectExpr -> WithBindings String
-formatSelect exprs state =
-  let Tuple parts s' = mapAccum formatSelectExpr state exprs
-  in Tuple ("SELECT " <> intercalate ", " parts) s'
+formatSelect exprs state = Tuple ("SELECT " <> intercalate ", " parts) s'
+  where
+  Tuple parts s' = mapAccum formatSelectExpr state exprs
 
 formatSelectExpr :: SelectExpr -> WithBindings String
 formatSelectExpr SelectStar state =
@@ -100,78 +102,77 @@ formatSelectExpr (SelectStarFrom t) state =
   Tuple (quoteIdent t <> ".*") state
 formatSelectExpr (SelectExpr e) state =
   formatExpr e state
-formatSelectExpr (SelectAs e alias) state =
-  let Tuple exprSql s' = formatExpr e state in
-  Tuple (exprSql <> " AS " <> quoteIdent alias) s'
+formatSelectExpr (SelectAs e alias) state = Tuple (exprSql <> " AS " <> quoteIdent alias) s'
+  where
+  Tuple exprSql s' = formatExpr e state
 
 formatFrom :: Maybe Relation -> WithBindings String
 formatFrom Nothing  state = Tuple mempty state
-formatFrom (Just r) state =
-  let Tuple sql s' = formatRelation r state
-  in Tuple ("FROM " <> sql) s'
+formatFrom (Just r) state = Tuple ("FROM " <> sql) s'
+  where
+  Tuple sql s' = formatRelation r state
 
 -- | Threads bindings because a derived table carries parameters of its own,
 -- | which must be numbered where they appear in the emitted SQL.
 formatRelation :: Relation -> WithBindings String
 formatRelation (Table name alias) state =
   Tuple (quoteIdent name <> maybe mempty (\a -> " AS " <> quoteIdent a) alias) state
-formatRelation (Derived q alias) state =
-  let Tuple sql s' = formatQuery " " q state
-  in Tuple ("(" <> sql <> ") AS " <> quoteIdent alias) s'
+formatRelation (Derived q alias) state = Tuple ("(" <> sql <> ") AS " <> quoteIdent alias) s'
+  where
+  Tuple sql s' = formatQuery " " q state
 
 formatJoins :: String -> Array Join -> WithBindings String
 formatJoins _ [] state = Tuple mempty state
-formatJoins sep joins state =
-  let Tuple parts s' = mapAccum formatJoin state joins
-  in Tuple (intercalate sep parts) s'
+formatJoins sep joins state = Tuple (intercalate sep parts) s'
+  where
+  Tuple parts s' = mapAccum formatJoin state joins
 
 formatJoin :: Join -> WithBindings String
-formatJoin j state =
-  let
-    kw = case j.type_ of
-      InnerJoin -> "JOIN"
-      LeftJoin  -> "LEFT JOIN"
-      RightJoin -> "RIGHT JOIN"
-      FullJoin  -> "FULL JOIN"
-    -- Relation before condition: a derived join target's parameters appear
-    -- earlier in the SQL than the ON clause's.
-    Tuple relSql s1 = formatRelation j.relation state
-    Tuple onSql  s2 = formatExpr j.on s1
-  in
-    Tuple (kw <> " " <> relSql <> " ON (" <> onSql <> ")") s2
+formatJoin j state = Tuple (kw <> " " <> relSql <> " ON (" <> onSql <> ")") s2
+  where
+  kw = case j.type_ of
+    InnerJoin -> "JOIN"
+    LeftJoin  -> "LEFT JOIN"
+    RightJoin -> "RIGHT JOIN"
+    FullJoin  -> "FULL JOIN"
+
+  -- Relation before condition: a derived join target's parameters appear
+  -- earlier in the SQL than the ON clause's.
+  Tuple relSql s1 = formatRelation j.relation state
+  Tuple onSql  s2 = formatExpr j.on s1
 
 formatWhere :: Maybe Expr -> WithBindings String
 formatWhere Nothing  state = Tuple mempty state
-formatWhere (Just e) state =
-  let Tuple sql s' = formatExpr e state
-  in Tuple ("WHERE " <> sql) s'
+formatWhere (Just e) state = Tuple ("WHERE " <> sql) s'
+  where
+  Tuple sql s' = formatExpr e state
 
 formatGroupBy :: Array Expr -> WithBindings String
 formatGroupBy [] state = Tuple mempty state
-formatGroupBy exprs state =
-  let Tuple parts s' = mapAccum formatExpr state exprs
-  in Tuple ("GROUP BY " <> intercalate ", " parts) s'
+formatGroupBy exprs state = Tuple ("GROUP BY " <> intercalate ", " parts) s'
+  where
+  Tuple parts s' = mapAccum formatExpr state exprs
 
 formatHaving :: Maybe Expr -> WithBindings String
 formatHaving Nothing  state = Tuple mempty state
-formatHaving (Just e) state =
-  let Tuple sql s' = formatExpr e state
-  in Tuple ("HAVING " <> sql) s'
+formatHaving (Just e) state = Tuple ("HAVING " <> sql) s'
+  where
+  Tuple sql s' = formatExpr e state
 
 formatOrderBy :: Array OrderExpr -> WithBindings String
 formatOrderBy [] state = Tuple mempty state
-formatOrderBy exprs state =
-  let Tuple parts s' = mapAccum formatOrderExpr state exprs
-  in Tuple ("ORDER BY " <> intercalate ", " parts) s'
+formatOrderBy exprs state = Tuple ("ORDER BY " <> intercalate ", " parts) s'
+  where
+  Tuple parts s' = mapAccum formatOrderExpr state exprs
 
 formatOrderExpr :: OrderExpr -> WithBindings String
-formatOrderExpr { expr, dir } state =
-  let
-    Tuple sql s' = formatExpr expr state
-    dirSql = case dir of
-      Asc  -> "ASC"
-      Desc -> "DESC"
-  in Tuple (sql <> " " <> dirSql) s'
+formatOrderExpr { expr, dir } state = Tuple (sql <> " " <> dirSql) s'
+  where
+  Tuple sql s' = formatExpr expr state
+
+  dirSql = case dir of
+    Asc  -> "ASC"
+    Desc -> "DESC"
 
 formatLimit :: Maybe Int -> String
 formatLimit Nothing  = mempty
@@ -232,49 +233,49 @@ formatExpr (Col { table: Nothing, column }) state =
 formatExpr (Col { table: Just t, column }) state =
   Tuple (quoteIdent t <> "." <> quoteIdent column) state
 formatExpr (Lit literal) state =
-  let idx = state.counter + 1
-  in Tuple ("$" <> show idx) { params: state.params <> [literal], counter: idx }
-formatExpr (App name args) state =
-  let Tuple parts s' = mapAccum formatExpr state args
-  in Tuple (name <> "(" <> intercalate ", " parts <> ")") s'
-formatExpr (BinOp op l r) state =
-  let
-    prec = opPrec op
-    Tuple lSql s1 = formatChild prec l state
-    -- Left-associative: an equal-precedence right operand needs bracketing.
-    Tuple rSql s2 = formatChild (prec + 1) r s1
-  in Tuple (lSql <> " " <> op <> " " <> rSql) s2
-formatExpr (Unary op e) state =
-  let Tuple sql s' = formatChild (unaryPrec op) e state
-  in Tuple (op <> " " <> sql) s'
-formatExpr (Postfix op e) state =
-  let Tuple sql s' = formatChild 4 e state
-  in Tuple (sql <> " " <> op) s'
-formatExpr (Cast e ty) state =
-  let Tuple sql s' = formatChild 12 e state
-  in Tuple (sql <> "::" <> ty) s'
-formatExpr (Row exprs) state =
-  let Tuple parts s' = mapAccum formatExpr state exprs
-  in Tuple ("(" <> intercalate ", " parts <> ")") s'
-formatExpr (Sub q) state =
+  Tuple ("$" <> show idx) { params: state.params <> [ literal ], counter: idx }
+  where
+  idx = state.counter + 1
+formatExpr (App name args) state = Tuple (name <> "(" <> intercalate ", " parts <> ")") s'
+  where
+  Tuple parts s' = mapAccum formatExpr state args
+formatExpr (BinOp op l r) state = Tuple (lSql <> " " <> op <> " " <> rSql) s2
+  where
+  prec = opPrec op
+  Tuple lSql s1 = formatChild prec l state
+  -- Left-associative: an equal-precedence right operand needs bracketing.
+  Tuple rSql s2 = formatChild (prec + 1) r s1
+formatExpr (Unary op e) state = Tuple (op <> " " <> sql) s'
+  where
+  Tuple sql s' = formatChild (unaryPrec op) e state
+formatExpr (Postfix op e) state = Tuple (sql <> " " <> op) s'
+  where
+  Tuple sql s' = formatChild 4 e state
+formatExpr (Cast e ty) state = Tuple (sql <> "::" <> ty) s'
+  where
+  Tuple sql s' = formatChild 12 e state
+formatExpr (Row exprs) state = Tuple ("(" <> intercalate ", " parts <> ")") s'
+  where
+  Tuple parts s' = mapAccum formatExpr state exprs
+formatExpr (Sub q) state = Tuple ("(" <> sql <> ")") s'
+  where
   -- Subqueries render on one line regardless of the outer separator: a nested
   -- SELECT reads better inline than broken across the parent's clauses.
-  let Tuple sql s' = formatQuery " " q state
-  in Tuple ("(" <> sql <> ")") s'
+  Tuple sql s' = formatQuery " " q state
 formatExpr (And [])    state = Tuple "TRUE"  state
-formatExpr (And exprs) state =
-  let Tuple parts s' = mapAccum formatExpr state exprs
-  in Tuple ("(" <> intercalate " AND " parts <> ")") s'
+formatExpr (And exprs) state = Tuple ("(" <> intercalate " AND " parts <> ")") s'
+  where
+  Tuple parts s' = mapAccum formatExpr state exprs
 formatExpr (Or [])    state = Tuple "FALSE" state
-formatExpr (Or exprs) state =
-  let Tuple parts s' = mapAccum formatExpr state exprs
-  in Tuple ("(" <> intercalate " OR " parts <> ")") s'
+formatExpr (Or exprs) state = Tuple ("(" <> intercalate " OR " parts <> ")") s'
+  where
+  Tuple parts s' = mapAccum formatExpr state exprs
 formatExpr (Between e lo hi) state =
-  let
-    Tuple eSql  s1 = formatChild 7 e  state
-    Tuple loSql s2 = formatChild 7 lo s1
-    Tuple hiSql s3 = formatChild 7 hi s2
-  in Tuple (eSql <> " BETWEEN " <> loSql <> " AND " <> hiSql) s3
+  Tuple (eSql <> " BETWEEN " <> loSql <> " AND " <> hiSql) s3
+  where
+  Tuple eSql  s1 = formatChild 7 e  state
+  Tuple loSql s2 = formatChild 7 lo s1
+  Tuple hiSql s3 = formatChild 7 hi s2
 formatExpr (Raw sql) state = Tuple sql state
 
 -- ---------------------------------------------------------------------------
@@ -285,15 +286,16 @@ formatExpr (Raw sql) state = Tuple sql state
 -- | than its position allows.
 formatChild :: Int -> Expr -> WithBindings String
 formatChild minPrec e state =
-  let Tuple sql s' = formatExpr e state
-  in Tuple (if precOf e < minPrec then "(" <> sql <> ")" else sql) s'
+  Tuple (if precOf e < minPrec then "(" <> sql <> ")" else sql) s'
+  where
+  Tuple sql s' = formatExpr e state
 
 mapAccum :: ∀ a. (a -> WithBindings String) -> Bindings -> Array a -> Tuple (Array String) Bindings
 mapAccum f s0 xs = foldl step (Tuple [] s0) xs
   where
-  step (Tuple acc st) x =
-    let Tuple r st' = f x st
-    in Tuple (acc <> [r]) st'
+  step (Tuple acc st) x = Tuple (acc <> [ r ]) st'
+    where
+    Tuple r st' = f x st
 
 quoteIdent :: String -> String
 quoteIdent ident =
