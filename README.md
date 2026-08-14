@@ -83,6 +83,7 @@ Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
 | Function | Description |
 |---|---|
 | `select :: Array SelectExpr -> Query -> Query` | Append to the SELECT list |
+| `select' :: Array SelectExpr -> Query` | Start a query from its select list, without naming `emptyQuery` |
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
 | `fromSub :: Query -> String -> Query -> Query` | FROM a derived table (subquery + alias) |
@@ -106,11 +107,34 @@ From `Sqld.Select`:
 | `star` | `select [star]` | `SELECT *` |
 | `cols :: Array String -> Array SelectExpr` | `cols ["u.id", "name"]` | `"u"."id", "name"` |
 | `tcols :: String -> Array String -> Array SelectExpr` | `tcols "u" ["id", "name"]` | `"u"."id", "u"."name"` |
-| `expr :: Expr -> SelectExpr` | `expr (tcol "u" "id")` | `"u"."id"` |
+| `expr :: Expr -> SelectExpr` | `expr (avg (col "age"))` | `AVG("age")` |
+| `exprs :: Array Expr -> Array SelectExpr` | `exprs [col "id", avg (col "age")]` | `"id", AVG("age")` |
 | `as :: Expr -> String -> SelectExpr` | `as (raw "COUNT(*)") "n"` | `COUNT(*) AS "n"` |
 | `colAs :: String -> String -> SelectExpr` | `colAs "created_at" "ts"` | `"created_at" AS "ts"` |
 | `tcolAs :: String -> String -> String -> SelectExpr` | `tcolAs "u" "created_at" "ts"` | `"u"."created_at" AS "ts"` |
 | `starFrom :: String -> SelectExpr` | `starFrom "u"` | `"u".*` |
+
+### Mixed select lists
+
+A PureScript array is homogeneous, so a select list combining plain columns
+with aliased expressions is built by concatenating:
+
+```purescript
+select (cols ["department"] <> [as countStar "headcount"])
+-- SELECT "department", COUNT(*) AS "headcount"
+```
+
+`select` is also additive, so the list can be built up in stages — useful when
+a fragment contributes columns of its own:
+
+```purescript
+select' (cols ["department"])
+  # select [as countStar "headcount"]
+```
+
+Keeping `SelectExpr` distinct from `Expr` is deliberate: it is what stops
+`as` and `star` from type-checking in a `WHERE` clause, where they are not
+valid SQL.
 
 ### Expressions
 

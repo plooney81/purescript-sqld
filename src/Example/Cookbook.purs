@@ -24,7 +24,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, emptyQuery)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, num, or, raw, str, sub, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, orderBy, rightJoin, select, star, starFrom, tcols, where_)
+import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, where_)
 
 type Example =
   { name  :: String
@@ -37,8 +37,7 @@ type Example =
 -- SQL string — they become numbered parameters, so there is nothing to escape.
 basicFiltering :: Query
 basicFiltering =
-  emptyQuery
-    # select (cols [ "id", "name", "email" ])
+  select' (cols [ "id", "name", "email" ])
     # from "users"
     # where_ (col "active" .== bool true)
 
@@ -48,8 +47,7 @@ basicFiltering =
 -- what the structure says. Calling `where_` twice ANDs rather than replaces.
 combiningConditions :: Query
 combiningConditions =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # from "users"
     # where_
         ( and
@@ -65,8 +63,7 @@ combiningConditions =
 -- is never true in SQL. `coalesce` supplies a fallback.
 nullHandling :: Query
 nullHandling =
-  emptyQuery
-    # select [ expr (col "id"), as (coalesce [ col "email", str "(none)" ]) "email" ]
+  select' (cols [ "id" ] <> [ as (coalesce [ col "email", str "(none)" ]) "email" ])
     # from "users"
     # where_ (and [ isNotNull (col "name"), isNull (col "department") ])
 
@@ -75,8 +72,7 @@ nullHandling =
 -- `like` is case-sensitive, `ilike` is not. `between` is inclusive at both ends.
 patternMatching :: Query
 patternMatching =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # from "users"
     # where_
         ( and
@@ -95,8 +91,7 @@ patternMatching =
 -- keeps a select list close to the SQL it produces.
 joins :: Query
 joins =
-  emptyQuery
-    # select (cols [ "u.name", "p.bio" ])
+  select' (cols [ "u.name", "p.bio" ])
     # fromAs "users" "u"
     # leftJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
     # innerJoinAs "orders" "o" (and [ col "u.id" .== col "o.user_id", col "o.status" .== str "paid" ])
@@ -107,8 +102,7 @@ joins =
 -- of one relation.
 rightJoinExample :: Query
 rightJoinExample =
-  emptyQuery
-    # select [ starFrom "profiles" ]
+  select' [ starFrom "profiles" ]
     # from "users"
     # rightJoin "profiles" (col "users.id" .== col "profiles.user_id")
 
@@ -117,8 +111,7 @@ rightJoinExample =
 -- Keeps unmatched rows from both sides.
 fullJoinExample :: Query
 fullJoinExample =
-  emptyQuery
-    # select (cols [ "u.name", "p.bio" ])
+  select' (cols [ "u.name", "p.bio" ])
     # fromAs "users" "u"
     # fullJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
 
@@ -128,13 +121,13 @@ fullJoinExample =
 -- alias works exactly as it does in SQL.
 aggregation :: Query
 aggregation =
-  emptyQuery
-    # select
-        [ expr (col "department")
-        , as countStar "headcount"
+  select'
+    ( cols [ "department" ] <>
+        [ as countStar "headcount"
         , as (count (col "email")) "with_email"
         , as (avg (col "age")) "mean_age"
         ]
+    )
     # from "users"
     # where_ (col "active" .== bool true)
     # groupBy [ col "department" ]
@@ -148,11 +141,10 @@ aggregation =
 -- Brackets appear only where precedence demands them.
 functionsAndCasts :: Query
 functionsAndCasts =
-  emptyQuery
-    # select
-        [ as (binOp "||" (col "name") (col "department")) "label"
-        , as (cast (col "id") "text") "id_text"
-        ]
+  select'
+    [ as (binOp "||" (col "name") (col "department")) "label"
+    , as (cast (col "id") "text") "id_text"
+    ]
     # from "users"
     # where_ (binOp "*" (binOp "+" (col "age") (int 1)) (int 2) .> int 40)
 
@@ -162,13 +154,11 @@ functionsAndCasts =
 -- without joining and de-duplicating.
 existsExample :: Query
 existsExample =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # fromAs "users" "u"
     # where_
         ( exists
-            ( emptyQuery
-                # select [ expr (raw "1") ]
+            ( select' [ expr (raw "1") ]
                 # from "orders"
                 # where_ (and [ col "orders.user_id" .== col "u.id", col "orders.status" .== str "paid" ])
             )
@@ -180,13 +170,11 @@ existsExample =
 -- never ordered.
 notExistsExample :: Query
 notExistsExample =
-  emptyQuery
-    # select (tcols "u" [ "id", "name" ])
+  select' (tcols "u" [ "id", "name" ])
     # fromAs "users" "u"
     # where_
         ( notExists
-            ( emptyQuery
-                # select [ expr (raw "1") ]
+            ( select' [ expr (raw "1") ]
                 # from "orders"
                 # where_ (col "orders.user_id" .== col "u.id")
             )
@@ -198,13 +186,11 @@ notExistsExample =
 -- numbered in step with the outer query.
 subqueryIn :: Query
 subqueryIn =
-  emptyQuery
-    # select [ star ]
+  select' [ star ]
     # from "users"
     # where_
         ( inSub (col "id")
-            ( emptyQuery
-                # select [ expr (col "user_id") ]
+            ( select' (cols [ "user_id" ])
                 # from "orders"
                 # where_ (col "total" .> num 100.0)
             )
@@ -215,19 +201,18 @@ subqueryIn =
 -- A subquery in the select list, correlated against the outer row.
 scalarSubquery :: Query
 scalarSubquery =
-  emptyQuery
-    # select
-        [ expr (col "u.name")
-        , as
+  select'
+    ( cols [ "u.name" ] <>
+        [ as
             ( sub
-                ( emptyQuery
-                    # select [ expr countStar ]
+                ( select' (exprs [ countStar ])
                     # from "orders"
                     # where_ (col "orders.user_id" .== col "u.id")
                 )
             )
             "order_count"
         ]
+    )
     # fromAs "users" "u"
 
 -- #example derived-table
@@ -237,11 +222,9 @@ scalarSubquery =
 -- inside the subquery are numbered before the outer query's.
 derivedTable :: Query
 derivedTable =
-  emptyQuery
-    # select [ starFrom "paid" ]
+  select' [ starFrom "paid" ]
     # fromSub
-        ( emptyQuery
-            # select (cols [ "id", "user_id", "total" ])
+        ( select' (cols [ "id", "user_id", "total" ])
             # from "orders"
             # where_ (col "status" .== str "paid")
         )
@@ -254,13 +237,11 @@ derivedTable =
 -- here, per-user totals computed once and joined back.
 derivedTableJoin :: Query
 derivedTableJoin =
-  emptyQuery
-    # select (cols [ "u.name", "totals.order_count" ])
+  select' (cols [ "u.name", "totals.order_count" ])
     # fromAs "users" "u"
     # joinOn InnerJoin
         ( derived
-            ( emptyQuery
-                # select [ expr (col "user_id"), as countStar "order_count" ]
+            ( select' (cols [ "user_id" ] <> [ as countStar "order_count" ])
                 # from "orders"
                 # groupBy [ col "user_id" ]
             )
@@ -277,8 +258,7 @@ paginate pageSize page = limit pageSize >>> offset (pageSize * page)
 
 pagination :: Query
 pagination =
-  emptyQuery
-    # select (cols [ "id", "title" ])
+  select' (cols [ "id", "title" ])
     # from "articles"
     # where_ (isNotNull (col "published_at"))
     # orderBy [ desc (col "published_at"), asc (col "id") ]
@@ -322,7 +302,7 @@ composingFragments = searchUsers (Just "engineering") (Just "@example.com") 1
 mergingQueries :: Query
 mergingQueries =
   mergeQueries
-    (emptyQuery # select [ star ] # from "users" # where_ (col "active" .== bool true))
+    (select' [ star ] # from "users" # where_ (col "active" .== bool true))
     (emptyQuery # where_ (col "age" .< int 30) # limit 10)
 
 -- #example raw-escape-hatch
@@ -332,8 +312,7 @@ mergingQueries =
 -- input. Reach for `app` and `binOp` first.
 rawEscapeHatch :: Query
 rawEscapeHatch =
-  emptyQuery
-    # select [ colAs "id" "id", as (raw "date_trunc('month', \"created_at\")") "month" ]
+  select' [ colAs "id" "id", as (raw "date_trunc('month', \"created_at\")") "month" ]
     # from "users"
     # where_ (raw "\"created_at\" > NOW() - INTERVAL '30 days'")
 

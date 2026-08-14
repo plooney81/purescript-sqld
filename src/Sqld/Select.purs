@@ -3,7 +3,7 @@ module Sqld.Select where
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<), (<>), map)
-import Sqld.Core (Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
+import Sqld.Core (Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
 import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -44,6 +44,17 @@ fromSub sub alias = fromRel $ derived sub alias
 
 select :: Array SelectExpr -> Query -> Query
 select exprs q = q { select = q.select <> exprs }
+
+-- | Starts a query from its select list, so the common case need not name
+-- | `emptyQuery`:
+-- |
+-- |     select' (cols [ "id", "name" ]) # from "users"
+-- |
+-- | `select` is additive, so further `select` calls append as usual. Build
+-- | reusable `Query -> Query` fragments with `select` and apply them to
+-- | `emptyQuery` at the end.
+select' :: Array SelectExpr -> Query
+select' exprs = select exprs emptyQuery
 
 where_ :: Expr -> Query -> Query
 where_ e q = q { where_ = Just $ case q.where_ of
@@ -119,6 +130,17 @@ starFrom = SelectStarFrom
 
 expr :: Expr -> SelectExpr
 expr = SelectExpr
+
+-- | The plural of `expr`, for a run of bare expressions.
+-- |
+-- | A PureScript array is homogeneous, so a select list mixing bare and
+-- | aliased items is built by concatenating:
+-- |
+-- |     select (cols [ "department" ] <> [ as countStar "headcount" ])
+-- |
+-- | `select` is also additive, so repeated calls append rather than replace.
+exprs :: Array Expr -> Array SelectExpr
+exprs = map SelectExpr
 
 -- | Plain column references. Names may be dot-qualified: `cols [ "u.id" ]`
 -- | renders `"u"."id"`.
