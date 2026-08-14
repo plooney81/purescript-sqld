@@ -104,7 +104,8 @@ From `Sqld.Select`:
 | Constructor | Example | SQL |
 |---|---|---|
 | `star` | `select [star]` | `SELECT *` |
-| `cols :: Array String -> Array SelectExpr` | `cols ["id", "name"]` | `"id", "name"` |
+| `cols :: Array String -> Array SelectExpr` | `cols ["u.id", "name"]` | `"u"."id", "name"` |
+| `tcols :: String -> Array String -> Array SelectExpr` | `tcols "u" ["id", "name"]` | `"u"."id", "u"."name"` |
 | `expr :: Expr -> SelectExpr` | `expr (tcol "u" "id")` | `"u"."id"` |
 | `as :: Expr -> String -> SelectExpr` | `as (raw "COUNT(*)") "n"` | `COUNT(*) AS "n"` |
 | `colAs :: String -> String -> SelectExpr` | `colAs "created_at" "ts"` | `"created_at" AS "ts"` |
@@ -118,7 +119,8 @@ From `Sqld.Expr`:
 | Constructor | Example | SQL |
 |---|---|---|
 | `col :: String -> Expr` | `col "name"` | `"name"` |
-| `tcol :: String -> String -> Expr` | `tcol "u" "id"` | `"u"."id"` |
+| `col` with a dot | `col "u.id"` | `"u"."id"` |
+| `tcol :: String -> String -> Expr` | `tcol "u" "id"` | `"u"."id"` (never splits on dots) |
 | `int / str / num / bool` | `int 42` | `$1` |
 | `null` | `null` | `$1` (NULL param) |
 | `raw :: String -> Expr` | `raw "NOW()"` | `NOW()` |
@@ -170,7 +172,7 @@ recent = emptyQuery
 emptyQuery
   # select [starFrom "recent"]
   # fromSub recent "recent"
-  # where_ (tcol "recent" "total" .> int 100)
+  # where_ (col "recent.total" .> int 100)
 -- SELECT "recent".* FROM (SELECT * FROM "orders" WHERE "status" = $1) AS "recent"
 --   WHERE "recent"."total" > $2
 ```
@@ -183,7 +185,7 @@ derived table's bindings come before the outer query's. Use `joinOn` with
 emptyQuery
   # select [star]
   # fromAs "users" "u"
-  # joinOn InnerJoin (derived totals "t") (tcol "u" "id" .== tcol "t" "user_id")
+  # joinOn InnerJoin (derived totals "t") (col "u.id" .== col "t.user_id")
 ```
 
 ### Operator precedence

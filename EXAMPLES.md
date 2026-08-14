@@ -158,14 +158,17 @@ Bound parameters: `$1` = `"%@example.com"`, `$2` = `18`, `$3` = `65`, `$4` = `"e
 Every join kind takes an alias variant. The `ON` condition is an ordinary
 expression, so anything you can put in a `WHERE` works here too.
 
+Column names may be dot-qualified: `col "u.id"` is `tcol "u" "id"`, which
+keeps a select list close to the SQL it produces.
+
 ```purescript
 joins :: Query
 joins =
   emptyQuery
-    # select [ expr (tcol "u" "name"), expr (tcol "p" "bio") ]
+    # select (cols [ "u.name", "p.bio" ])
     # fromAs "users" "u"
-    # leftJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
-    # innerJoinAs "orders" "o" (and [ tcol "u" "id" .== tcol "o" "user_id", tcol "o" "status" .== str "paid" ])
+    # leftJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
+    # innerJoinAs "orders" "o" (and [ col "u.id" .== col "o.user_id", col "o.status" .== str "paid" ])
 ```
 
 ```sql
@@ -192,7 +195,7 @@ rightJoinExample =
   emptyQuery
     # select [ starFrom "profiles" ]
     # from "users"
-    # rightJoin "profiles" (tcol "users" "id" .== tcol "profiles" "user_id")
+    # rightJoin "profiles" (col "users.id" .== col "profiles.user_id")
 ```
 
 ```sql
@@ -213,9 +216,9 @@ Keeps unmatched rows from both sides.
 fullJoinExample :: Query
 fullJoinExample =
   emptyQuery
-    # select [ expr (tcol "u" "name"), expr (tcol "p" "bio") ]
+    # select (cols [ "u.name", "p.bio" ])
     # fromAs "users" "u"
-    # fullJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
+    # fullJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
 ```
 
 ```sql
@@ -311,7 +314,7 @@ existsExample =
             ( emptyQuery
                 # select [ expr (raw "1") ]
                 # from "orders"
-                # where_ (and [ tcol "orders" "user_id" .== tcol "u" "id", tcol "orders" "status" .== str "paid" ])
+                # where_ (and [ col "orders.user_id" .== col "u.id", col "orders.status" .== str "paid" ])
             )
         )
 ```
@@ -337,14 +340,14 @@ never ordered.
 notExistsExample :: Query
 notExistsExample =
   emptyQuery
-    # select [ expr (tcol "u" "id"), expr (tcol "u" "name") ]
+    # select (tcols "u" [ "id", "name" ])
     # fromAs "users" "u"
     # where_
         ( notExists
             ( emptyQuery
                 # select [ expr (raw "1") ]
                 # from "orders"
-                # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+                # where_ (col "orders.user_id" .== col "u.id")
             )
         )
 ```
@@ -401,13 +404,13 @@ scalarSubquery :: Query
 scalarSubquery =
   emptyQuery
     # select
-        [ expr (tcol "u" "name")
+        [ expr (col "u.name")
         , as
             ( sub
                 ( emptyQuery
                     # select [ expr countStar ]
                     # from "orders"
-                    # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+                    # where_ (col "orders.user_id" .== col "u.id")
                 )
             )
             "order_count"
@@ -442,7 +445,7 @@ derivedTable =
             # where_ (col "status" .== str "paid")
         )
         "paid"
-    # where_ (tcol "paid" "total" .> num 100.0)
+    # where_ (col "paid.total" .> num 100.0)
 ```
 
 ```sql
@@ -466,7 +469,7 @@ here, per-user totals computed once and joined back.
 derivedTableJoin :: Query
 derivedTableJoin =
   emptyQuery
-    # select [ expr (tcol "u" "name"), expr (tcol "totals" "order_count") ]
+    # select (cols [ "u.name", "totals.order_count" ])
     # fromAs "users" "u"
     # joinOn InnerJoin
         ( derived
@@ -477,7 +480,7 @@ derivedTableJoin =
             )
             "totals"
         )
-        (tcol "u" "id" .== tcol "totals" "user_id")
+        (col "u.id" .== col "totals.user_id")
 ```
 
 ```sql

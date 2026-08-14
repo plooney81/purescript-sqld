@@ -28,7 +28,7 @@ import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
 import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
 import Sqld.Expr (and, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, where_)
+import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, tcols, where_)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -419,6 +419,23 @@ handWritten =
                     # where_ (tcol "orders" "user_id" .== tcol "u" "id")
                 )
             )
+    }
+
+  -- Dot-qualified column references ------------------------------------------
+
+  , { name: "dotted-column-references"
+    , query: emptyQuery
+        # select (cols [ "orders.id", "users.name" ])
+        # from "orders"
+        # innerJoin "users" (col "orders.user_id" .== col "users.id")
+        # where_ (col "orders.status" .== str "paid")
+    }
+
+  , { name: "dotted-column-references-aliased"
+    , query: emptyQuery
+        # select (tcols "u" [ "id", "name" ] <> cols [ "p.bio" ])
+        # fromAs "users" "u"
+        # leftJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
     }
 
   -- Derived tables -----------------------------------------------------------

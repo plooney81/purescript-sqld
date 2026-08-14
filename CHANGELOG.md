@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `joinOn :: JoinType -> Relation -> Expr -> Query -> Query` — the general join form, and the way to join a derived table
 - `fromRel :: Relation -> Query -> Query` — the general FROM form
 - `starFrom :: String -> SelectExpr` — `"t".*`, previously documented in the README but never implemented
+- `tcols :: String -> Array String -> Array SelectExpr` — columns sharing one table qualifier
 - `notLike` / `notILike`
 - Function wrappers over `app`: `count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`, `upper`
 - `EXAMPLES.md` — a worked cookbook of 19 examples covering filtering, joins, aggregation, subqueries, derived tables, composition and the `raw` escape hatch. Generated from `Example.Cookbook` by `scripts/build-examples.mjs`, which slices the PureScript out of the source file rather than from a copy, so the code shown is the code that ran. Every example is also a corpus entry, so PostgreSQL validates it; CI fails if the file is stale or the examples drift from the source
@@ -52,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI runs the harness against a `postgres:16` service container on every push and pull request
 
 ### Changed
+- `col` splits on a dot, so `col "u.id"` is `tcol "u" "id"` and renders `"u"."id"`. Previously the whole string was quoted as a single identifier, which produced SQL PostgreSQL rejects — two golden tests were asserting exactly that, green, because they were never in the validation corpus. `tcol` and `colRef` never split, for identifiers that genuinely contain a dot
 - `Relation` is now a sum type (`Table String (Maybe String)` / `Derived Query String`) rather than a record, so `FROM` and join targets can hold a subquery. `rel` and `relAs` are unchanged; code constructing the record literal directly must switch to them
 - `formatRelation` now threads bindings, since a derived table carries parameters of its own
 - Expression AST collapsed onto generic nodes — `Eq`, `Neq`, `Lt`, `Lte`, `Gt`, `Gte`, `Like`, `ILike`, `In` and `NotIn` are replaced by `BinOp String Expr Expr`; `Not` by `Unary`; `IsNull` and `IsNotNull` by `Postfix`. The `Sqld.Expr` surface is unchanged — `.==`, `like`, `isNull` and friends now build the generic nodes — so builder code needs no edits; only code pattern-matching on `Sqld.Core.Expr` directly is affected

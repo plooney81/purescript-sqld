@@ -113,7 +113,7 @@ selectSpec = describe "Sqld.Select" do
             # from "orders"
             # innerJoin "users" (col "orders.user_id" .== col "users.id")
             # formatInline
-      query `shouldEqual` "SELECT * FROM \"orders\" JOIN \"users\" ON (\"orders.user_id\" = \"users.id\")"
+      query `shouldEqual` "SELECT * FROM \"orders\" JOIN \"users\" ON (\"orders\".\"user_id\" = \"users\".\"id\")"
 
     it "LEFT JOIN with alias" do
       let query = emptyQuery
@@ -247,7 +247,7 @@ selectSpec = describe "Sqld.Select" do
       let base     = emptyQuery # select [star] # from "a" # innerJoin "b" (col "a.id" .== col "b.a_id")
           override = emptyQuery # innerJoin "c" (col "a.id" .== col "c.a_id")
           query    = mergeQueries base override # formatInline
-      query `shouldEqual` "SELECT * FROM \"a\" JOIN \"b\" ON (\"a.id\" = \"b.a_id\") JOIN \"c\" ON (\"a.id\" = \"c.a_id\")"
+      query `shouldEqual` "SELECT * FROM \"a\" JOIN \"b\" ON (\"a\".\"id\" = \"b\".\"a_id\") JOIN \"c\" ON (\"a\".\"id\" = \"c\".\"a_id\")"
 
   describe "function composition (>>>)" do
     let baseUsers :: Query -> Query

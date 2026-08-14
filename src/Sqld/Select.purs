@@ -4,7 +4,7 @@ import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<), (<>), map)
 import Sqld.Core (Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
-import Sqld.Expr (col)
+import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
 -- Relations
@@ -120,8 +120,15 @@ starFrom = SelectStarFrom
 expr :: Expr -> SelectExpr
 expr = SelectExpr
 
+-- | Plain column references. Names may be dot-qualified: `cols [ "u.id" ]`
+-- | renders `"u"."id"`.
 cols :: Array String -> Array SelectExpr
 cols = map (SelectExpr <<< col)
+
+-- | Columns sharing one table qualifier: `tcols "u" [ "id", "name" ]` renders
+-- | `"u"."id", "u"."name"`.
+tcols :: String -> Array String -> Array SelectExpr
+tcols t = map (SelectExpr <<< tcol t)
 
 as :: Expr -> String -> SelectExpr
 as = SelectAs
