@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- PostgreSQL validation harness — every query in the corpus is replayed against a real server via `PREPARE`. Because `PREPARE` runs full parse *analysis* rather than a syntax check alone, unknown columns, invalid `GROUP BY`, and operator type mismatches fail alongside malformed SQL. Both formatter outputs are validated: the parameterised form from `format` and the debug form from `formatInline`
+- `Test.Sqld.Corpus` — one canonical corpus of queries, consumed by both the golden tests and the PostgreSQL harness, with each entry tagged by the AST constructors it exercises
+- Coverage ratchet — `Test.Sqld.CorpusSpec` fails if any `Sqld.Core` constructor has no corpus entry, so a new feature cannot ship without SQL that PostgreSQL has accepted
+- `test/fixtures/schema.sql` — fixture tables the corpus references
+- `scripts/validate-sql.mjs` — the validator, supporting `--only <pattern>`, `--sql <query>` for ad-hoc probes, and `--list`
+- `scripts/pg-validate-local.sh` — local runs against a throwaway Docker PostgreSQL container
+- `Makefile` — `make validate`, `validate-fast`, `sql`, `list`, `pg-stop`, and a self-documenting `make help`
+- CI now runs the harness against a `postgres:16` service container on every push and pull request
+
 ## [0.1.0] - 2026-05-08
 
 ### Added
