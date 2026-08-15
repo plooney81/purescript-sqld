@@ -199,35 +199,55 @@ Common aggregates and functions are provided as one-line wrappers over `app`:
 them the way `groupBy` does:
 
 ```purescript
-rowNumber `over` emptyWindow
-  { partitionBy = [col "department"]
-  , orderBy     = [desc (col "age")]
-  }
+rowNumber `over'`
+  ( partitionBy [col "department"]
+      >>> orderWindow [desc (col "age")]
+  )
 -- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
 ```
 
-A `Window` is a plain record from `Sqld.Core`, so windows are built from
-`emptyWindow` by record update and compose the same way — name a partition
-once, then add the ordering or frame each column needs. Every field is
-optional, and an empty window emits `OVER ()`, which is valid SQL.
+A window is built the way a query is. `partitionBy`, `orderWindow` and
+`withFrame` are plain `Window -> Window` functions, so they compose with `>>>`
+and pipe with `#`; `over'` applies them to `emptyWindow`, the way `select'`
+starts a query from `emptyQuery`. Every field is optional, and an empty window
+emits `OVER ()`, which is valid SQL.
+
+Windows are values, so name one that several columns share and add to it:
+
+```purescript
+byUser :: Window
+byUser = emptyWindow # partitionBy [col "user_id"] # orderWindow [asc (col "placed_at")]
+
+sum_ (col "total") `over` (byUser # withFrame (rows unboundedPreceding currentRow))
+-- SUM("total") OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC
+--                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+```
 
 | Constructor | Example | SQL |
 |---|---|---|
 | `over :: Expr -> Window -> Expr` | ``countStar `over` emptyWindow`` | `COUNT(*) OVER ()` |
+| `over' :: Expr -> (Window -> Window) -> Expr` | ``rank `over'` partitionBy [col "d"]`` | `RANK() OVER (PARTITION BY "d")` |
+| `partitionBy :: Array Expr -> Window -> Window` | `partitionBy [col "department"]` | `PARTITION BY "department"` |
+| `orderWindow :: Array OrderExpr -> Window -> Window` | `orderWindow [desc (col "age")]` | `ORDER BY "age" DESC` |
+| `withFrame :: Frame -> Window -> Window` | `withFrame (rows unboundedPreceding currentRow)` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` |
 | `rowNumber` / `rank` / `denseRank` | `rank` | `RANK()` |
 | `lag` / `lead :: Expr -> Int -> Expr` | `lag (col "total") 1` | `LAG("total", $1)` |
-| `rows` / `range` / `groups` | `rows unboundedPreceding currentRow` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` |
+| `rows` / `range` / `groups` | `rows (preceding 3) currentRow` | `ROWS BETWEEN 3 PRECEDING AND CURRENT ROW` |
 | `frameBetween :: FrameMode -> FrameBound -> FrameBound -> Frame` | `frameBetween Range currentRow unboundedFollowing` | `RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING` |
 | `frameFrom :: FrameMode -> FrameBound -> Frame` | `frameFrom Rows unboundedPreceding` | `ROWS UNBOUNDED PRECEDING` |
 | `unboundedPreceding` / `currentRow` / `unboundedFollowing` | `currentRow` | `CURRENT ROW` |
 | `preceding` / `following :: Int -> FrameBound` | `preceding 3` | `3 PRECEDING` |
 
-The `frame` field is a `Maybe Frame`, so it is set as
-`frame = Just (rows unboundedPreceding currentRow)` — which is what turns an
-ordered `SUM` into a running one. Offsets are emitted literally rather than as
-parameters, so a frame carries no bindings; a window's `PARTITION BY` and
-`ORDER BY` expressions do, and they are numbered where they appear, which in a
-select list is ahead of the `WHERE` clause's.
+`orderWindow` is the one name that does not match its SQL keyword: `orderBy`
+already belongs to `Sqld.Select`, and a second one here would collide in any
+module importing both. `Window` is an ordinary record (`partitionBy`,
+`orderBy`, `frame`), so record update reaches the fields directly if you prefer
+it — the builders are setters over exactly those three.
+
+Frame offsets are emitted literally rather than as parameters, so a frame
+carries no bindings; a window's `PARTITION BY` and `ORDER BY` expressions do,
+and they are numbered where they appear, which in a select list is ahead of the
+`WHERE` clause's.
 
 `OVER` binds tighter than any operator, so a window function is an atom that
 never needs bracketing. PostgreSQL allows one in `SELECT` and `ORDER BY` only,

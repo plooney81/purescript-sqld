@@ -10,7 +10,7 @@ module Sqld.Expr where
 import Prelude (($), (+), (<<<))
 import Data.Maybe (Maybe(..))
 import Data.String as String
-import Sqld.Core (Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), Query, Window)
+import Sqld.Core (Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), OrderExpr, Query, Window, emptyWindow)
 
 -- ---------------------------------------------------------------------------
 -- Column references
@@ -256,6 +256,47 @@ upper e = App "UPPER" [ e ]
 -- | the mistake.
 over :: Expr -> Window -> Expr
 over = Over
+
+-- | `over` starting from `emptyWindow`, so a one-off window need not name it —
+-- | the same shorthand `select'` is for `emptyQuery`:
+-- |
+-- |     rowNumber `over'`
+-- |       ( partitionBy [ col "department" ]
+-- |           >>> orderWindow [ desc (col "age") ]
+-- |       )
+-- |     -- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
+-- |
+-- | The second argument is any `Window -> Window`, so window builders compose
+-- | with `>>>` the way query fragments do. Reach for `over` with a named
+-- | `Window` when several columns share one, and for `` e `over` emptyWindow ``
+-- | to say `OVER ()`.
+over' :: Expr -> (Window -> Window) -> Expr
+over' e f = Over e (f emptyWindow)
+
+-- ---------------------------------------------------------------------------
+-- Window builders
+-- ---------------------------------------------------------------------------
+--
+-- Plain `Window -> Window` functions, so they compose with `>>>` into `over'`
+-- or pipe onto a named window with `#`, exactly as the `Sqld.Select` builders
+-- do. Each replaces its field rather than appending to it.
+
+partitionBy :: Array Expr -> Window -> Window
+partitionBy exprs w = w { partitionBy = exprs }
+
+-- | A window's `ORDER BY`, which decides both the order rows are numbered in
+-- | and, for a `RANGE` or `GROUPS` frame, which rows count as peers.
+-- |
+-- | Named `orderWindow` rather than `orderBy` because `Sqld.Select` already
+-- | uses that name for a query's ordering, and the two would collide in any
+-- | module importing both unqualified.
+orderWindow :: Array OrderExpr -> Window -> Window
+orderWindow orders w = w { orderBy = orders }
+
+-- | Sets the frame, taking the `Frame` rather than a `Maybe Frame`: a window
+-- | either has one or is left alone.
+withFrame :: Frame -> Window -> Window
+withFrame f w = w { frame = Just f }
 
 -- | `ROW_NUMBER()` — the row's position in its partition, ties broken
 -- | arbitrarily.

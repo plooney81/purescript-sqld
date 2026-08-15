@@ -272,17 +272,22 @@ Bound parameters: `$1` = `true`, `$2` = `3`
 one, without collapsing them the way `groupBy` does. Every row survives, and
 each carries its own answer.
 
-A `Window` is a plain record, so windows compose by record update: `byUser`
-names the partition once, and each column below adds the ordering or frame it
-needs. `frame` is what turns an ordered sum into a running one — here, every
-row from the start of the partition up to the current one.
+A window is built the way a query is: `partitionBy`, `orderWindow` and
+`withFrame` are plain `Window -> Window` functions, so they pipe onto a named
+window with `#` and compose with `>>>`. `byUser` names the partition once and
+each column below adds what it needs. `withFrame` is what turns an ordered
+sum into a running one — here, every row from the start of the partition up
+to the current one.
+
+For a window used once there is nothing to name: `over'` starts from the
+empty window the way `select'` starts from `emptyQuery`.
 
 ```purescript
 windowFunctions :: Query
 windowFunctions =
   select'
     ( cols [ "user_id", "placed_at", "total" ] <>
-        [ as (rowNumber `over` byUser { orderBy = [ desc (col "total") ] }) "biggest_first"
+        [ as (rowNumber `over'` (partitionBy [ col "user_id" ] >>> orderWindow [ desc (col "total") ])) "biggest_first"
         , as (lag (col "total") 1 `over` chronological) "previous_total"
         , as (sum_ (col "total") `over` runningTotal) "running_total"
         ]
@@ -291,13 +296,13 @@ windowFunctions =
     # where_ (col "status" .== str "paid")
 
 byUser :: Window
-byUser = emptyWindow { partitionBy = [ col "user_id" ] }
+byUser = emptyWindow # partitionBy [ col "user_id" ]
 
 chronological :: Window
-chronological = byUser { orderBy = [ asc (col "placed_at") ] }
+chronological = byUser # orderWindow [ asc (col "placed_at") ]
 
 runningTotal :: Window
-runningTotal = chronological { frame = Just (rows unboundedPreceding currentRow) }
+runningTotal = chronological # withFrame (rows unboundedPreceding currentRow)
 ```
 
 ```sql

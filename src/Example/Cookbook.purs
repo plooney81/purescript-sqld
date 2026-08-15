@@ -23,7 +23,7 @@ import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery, emptyWindow)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, over, raw, rows, rowNumber, str, sub, sum_, unboundedPreceding, (.<), (.==), (.>), (.>=))
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, over', partitionBy, raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
@@ -141,15 +141,20 @@ aggregation =
 -- one, without collapsing them the way `groupBy` does. Every row survives, and
 -- each carries its own answer.
 --
--- A `Window` is a plain record, so windows compose by record update: `byUser`
--- names the partition once, and each column below adds the ordering or frame it
--- needs. `frame` is what turns an ordered sum into a running one — here, every
--- row from the start of the partition up to the current one.
+-- A window is built the way a query is: `partitionBy`, `orderWindow` and
+-- `withFrame` are plain `Window -> Window` functions, so they pipe onto a named
+-- window with `#` and compose with `>>>`. `byUser` names the partition once and
+-- each column below adds what it needs. `withFrame` is what turns an ordered
+-- sum into a running one — here, every row from the start of the partition up
+-- to the current one.
+--
+-- For a window used once there is nothing to name: `over'` starts from the
+-- empty window the way `select'` starts from `emptyQuery`.
 windowFunctions :: Query
 windowFunctions =
   select'
     ( cols [ "user_id", "placed_at", "total" ] <>
-        [ as (rowNumber `over` byUser { orderBy = [ desc (col "total") ] }) "biggest_first"
+        [ as (rowNumber `over'` (partitionBy [ col "user_id" ] >>> orderWindow [ desc (col "total") ])) "biggest_first"
         , as (lag (col "total") 1 `over` chronological) "previous_total"
         , as (sum_ (col "total") `over` runningTotal) "running_total"
         ]
@@ -158,13 +163,13 @@ windowFunctions =
     # where_ (col "status" .== str "paid")
 
 byUser :: Window
-byUser = emptyWindow { partitionBy = [ col "user_id" ] }
+byUser = emptyWindow # partitionBy [ col "user_id" ]
 
 chronological :: Window
-chronological = byUser { orderBy = [ asc (col "placed_at") ] }
+chronological = byUser # orderWindow [ asc (col "placed_at") ]
 
 runningTotal :: Window
-runningTotal = chronological { frame = Just (rows unboundedPreceding currentRow) }
+runningTotal = chronological # withFrame (rows unboundedPreceding currentRow)
 
 -- #example functions-and-casts
 -- # Functions, casts and arbitrary operators

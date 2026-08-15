@@ -1,9 +1,9 @@
 module Test.Sqld.ExprSpec where
 
-import Prelude (Unit, discard, (#))
+import Prelude (Unit, discard, (#), (>>>))
 import Data.Maybe (Maybe(..))
 import Sqld.Core (FrameMode(..), Literal(..), emptyWindow)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, over, preceding, range, rank, raw, rows, rowNumber, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, (.!=), (.==), (.>), (.>=))
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, orderWindow, over, over', partitionBy, preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.==), (.>), (.>=))
 import Sqld.Format (format, formatInline)
 import Sqld.Select (as, asc, cols, desc, expr, from, orderBy, select', star, where_)
 import Test.Spec (Spec, describe, it)
@@ -308,10 +308,10 @@ exprSpec = describe "Sqld.Expr" do
 
   describe "window functions" do
     it "PARTITION BY and ORDER BY" do
-      let query = select' [as (rowNumber `over` emptyWindow
-                                  { partitionBy = [col "department"]
-                                  , orderBy = [desc (col "age")]
-                                  }) "rn"]
+      let query = select' [as (rowNumber `over'`
+                                  ( partitionBy [col "department"]
+                                      >>> orderWindow [desc (col "age")]
+                                  )) "rn"]
             # from "users"
             # formatInline
       query `shouldEqual`
@@ -324,30 +324,39 @@ exprSpec = describe "Sqld.Expr" do
             # formatInline
       query `shouldEqual` "SELECT COUNT(*) OVER () AS \"total\" FROM \"users\""
 
+    -- `over'` starts from `emptyWindow`, the way `select'` starts from
+    -- `emptyQuery`, so the builders compose into it with `>>>`.
+    it "over' matches a window built from emptyWindow" do
+      let build = partitionBy [col "department"] >>> orderWindow [desc (col "age")]
+          sugared = select' [as (rowNumber `over'` build) "rn"] # from "users" # formatInline
+          spelled = select' [as (rowNumber `over` build emptyWindow) "rn"] # from "users" # formatInline
+      sugared `shouldEqual` spelled
+
     it "PARTITION BY alone" do
-      let query = select' [as (rank `over` emptyWindow { partitionBy = [col "department"] }) "r"]
+      let query = select' [as (rank `over'` partitionBy [col "department"]) "r"]
             # from "users"
             # formatInline
       query `shouldEqual`
         "SELECT RANK() OVER (PARTITION BY \"department\") AS \"r\" FROM \"users\""
 
     it "ORDER BY alone" do
-      let query = select' [as (denseRank `over` emptyWindow { orderBy = [asc (col "score")] }) "r"]
+      let query = select' [as (denseRank `over'` orderWindow [asc (col "score")]) "r"]
             # from "users"
             # formatInline
       query `shouldEqual`
         "SELECT DENSE_RANK() OVER (ORDER BY \"score\" ASC) AS \"r\" FROM \"users\""
 
-    it "an aggregate over a window" do
-      let query = select' [as (sum_ (col "total") `over` emptyWindow
-                                  { partitionBy = [col "user_id"] }) "user_total"]
+    -- A named window pipes together with `#` and is shared by `over`.
+    it "an aggregate over a named window" do
+      let byUser = emptyWindow # partitionBy [col "user_id"]
+          query = select' [as (sum_ (col "total") `over` byUser) "user_total"]
             # from "orders"
             # formatInline
       query `shouldEqual`
         "SELECT SUM(\"total\") OVER (PARTITION BY \"user_id\") AS \"user_total\" FROM \"orders\""
 
     it "lag and lead take an offset" do
-      let window = emptyWindow { orderBy = [asc (col "placed_at")] }
+      let window = emptyWindow # orderWindow [asc (col "placed_at")]
           query = select' [ as (lag (col "total") 1 `over` window) "prev"
                           , as (lead (col "total") 2 `over` window) "next"
                           ]
@@ -357,10 +366,10 @@ exprSpec = describe "Sqld.Expr" do
         "SELECT LAG(\"total\", 1) OVER (ORDER BY \"placed_at\" ASC) AS \"prev\", LEAD(\"total\", 2) OVER (ORDER BY \"placed_at\" ASC) AS \"next\" FROM \"orders\""
 
     it "frames: ROWS BETWEEN" do
-      let query = select' [as (sum_ (col "total") `over` emptyWindow
-                                  { orderBy = [asc (col "placed_at")]
-                                  , frame = Just (rows unboundedPreceding currentRow)
-                                  }) "running"]
+      let query = select' [as (sum_ (col "total") `over'`
+                                  ( orderWindow [asc (col "placed_at")]
+                                      >>> withFrame (rows unboundedPreceding currentRow)
+                                  )) "running"]
             # from "orders"
             # formatInline
       query `shouldEqual`
@@ -368,10 +377,10 @@ exprSpec = describe "Sqld.Expr" do
 
     -- Offsets are emitted literally: a frame carries no parameters.
     it "frames: offset bounds" do
-      let result = select' [as (avg (col "total") `over` emptyWindow
-                                   { orderBy = [asc (col "placed_at")]
-                                   , frame = Just (rows (preceding 3) (following 1))
-                                   }) "moving"]
+      let result = select' [as (avg (col "total") `over'`
+                                   ( orderWindow [asc (col "placed_at")]
+                                       >>> withFrame (rows (preceding 3) (following 1))
+                                   )) "moving"]
             # from "orders"
             # format
       result.sql `shouldEqual`
@@ -379,8 +388,11 @@ exprSpec = describe "Sqld.Expr" do
       result.params `shouldEqual` []
 
     it "frames: RANGE and GROUPS" do
-      let window f = emptyWindow { orderBy = [asc (col "placed_at")], frame = Just f }
-          rendered f = formatInline (select' [as (sum_ (col "total") `over` window f) "t"] # from "orders")
+      let rendered f = formatInline
+            ( select' [as (sum_ (col "total") `over'`
+                              (orderWindow [asc (col "placed_at")] >>> withFrame f)) "t"]
+                # from "orders"
+            )
       rendered (range currentRow unboundedFollowing) `shouldEqual`
         "SELECT SUM(\"total\") OVER (ORDER BY \"placed_at\" ASC RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS \"t\" FROM \"orders\""
       rendered (groups unboundedPreceding currentRow) `shouldEqual`
@@ -388,10 +400,10 @@ exprSpec = describe "Sqld.Expr" do
 
     -- The one-bound form runs from the bound to the current row.
     it "frames: the one-bound form omits BETWEEN" do
-      let query = select' [as (sum_ (col "total") `over` emptyWindow
-                                  { orderBy = [asc (col "placed_at")]
-                                  , frame = Just (frameFrom Rows unboundedPreceding)
-                                  }) "t"]
+      let query = select' [as (sum_ (col "total") `over'`
+                                  ( orderWindow [asc (col "placed_at")]
+                                      >>> withFrame (frameFrom Rows unboundedPreceding)
+                                  )) "t"]
             # from "orders"
             # formatInline
       query `shouldEqual`
@@ -409,7 +421,7 @@ exprSpec = describe "Sqld.Expr" do
     it "a window function is legal in ORDER BY" do
       let query = select' (cols ["name"])
             # from "users"
-            # orderBy [asc (rank `over` emptyWindow { orderBy = [desc (col "score")] })]
+            # orderBy [asc (rank `over'` orderWindow [desc (col "score")])]
             # formatInline
       query `shouldEqual`
         "SELECT \"name\" FROM \"users\" ORDER BY RANK() OVER (ORDER BY \"score\" DESC) ASC"
@@ -417,8 +429,8 @@ exprSpec = describe "Sqld.Expr" do
     -- A window sits in the select list, so its parameters are numbered before
     -- the WHERE clause's.
     it "numbers a window's parameters in emitted order" do
-      let result = select' [as (countStar `over` emptyWindow
-                                   { partitionBy = [coalesce [col "department", str "unknown"]] })
+      let result = select' [as (countStar `over'`
+                                   partitionBy [coalesce [col "department", str "unknown"]])
                               "headcount"]
             # from "users"
             # where_ (col "active" .== bool true)
