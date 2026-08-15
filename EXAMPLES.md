@@ -312,7 +312,11 @@ existsExample =
 ```sql
 SELECT *
 FROM "users" AS "u"
-WHERE EXISTS (SELECT 1 FROM "orders" WHERE ("orders"."user_id" = "u"."id" AND "orders"."status" = 'paid'))
+WHERE EXISTS (
+  SELECT 1
+  FROM "orders"
+  WHERE ("orders"."user_id" = "u"."id" AND "orders"."status" = 'paid')
+)
 ```
 
 Bound parameters: `$1` = `"paid"`
@@ -343,7 +347,11 @@ notExistsExample =
 ```sql
 SELECT "u"."id", "u"."name"
 FROM "users" AS "u"
-WHERE NOT EXISTS (SELECT 1 FROM "orders" WHERE "orders"."user_id" = "u"."id")
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM "orders"
+  WHERE "orders"."user_id" = "u"."id"
+)
 ```
 
 <sub>Parameterised: <code>SELECT "u"."id", "u"."name" FROM "users" AS "u" WHERE NOT EXISTS (SELECT 1 FROM "orders" WHERE "orders"."user_id" = "u"."id")</code></sub>
@@ -372,7 +380,11 @@ subqueryIn =
 ```sql
 SELECT *
 FROM "users"
-WHERE "id" IN (SELECT "user_id" FROM "orders" WHERE "total" > 100.0)
+WHERE "id" IN (
+  SELECT "user_id"
+  FROM "orders"
+  WHERE "total" > 100.0
+)
 ```
 
 Bound parameters: `$1` = `100`
@@ -404,7 +416,11 @@ scalarSubquery =
 ```
 
 ```sql
-SELECT "u"."name", (SELECT COUNT(*) FROM "orders" WHERE "orders"."user_id" = "u"."id") AS "order_count"
+SELECT "u"."name", (
+  SELECT COUNT(*)
+  FROM "orders"
+  WHERE "orders"."user_id" = "u"."id"
+) AS "order_count"
 FROM "users" AS "u"
 ```
 
@@ -433,7 +449,11 @@ derivedTable =
 
 ```sql
 SELECT "paid".*
-FROM (SELECT "id", "user_id", "total" FROM "orders" WHERE "status" = 'paid') AS "paid"
+FROM (
+  SELECT "id", "user_id", "total"
+  FROM "orders"
+  WHERE "status" = 'paid'
+) AS "paid"
 WHERE "paid"."total" > 100.0
 ```
 
@@ -467,7 +487,11 @@ derivedTableJoin =
 ```sql
 SELECT "u"."name", "totals"."order_count"
 FROM "users" AS "u"
-JOIN (SELECT "user_id", COUNT(*) AS "order_count" FROM "orders" GROUP BY "user_id") AS "totals" ON ("u"."id" = "totals"."user_id")
+JOIN (
+  SELECT "user_id", COUNT(*) AS "order_count"
+  FROM "orders"
+  GROUP BY "user_id"
+) AS "totals" ON ("u"."id" = "totals"."user_id")
 ```
 
 <sub>Parameterised: <code>SELECT "u"."name", "totals"."order_count" FROM "users" AS "u" JOIN (SELECT "user_id", COUNT(*) AS "order_count" FROM "orders" GROUP BY "user_id") AS "totals" ON ("u"."id" = "totals"."user_id")</code></sub>
