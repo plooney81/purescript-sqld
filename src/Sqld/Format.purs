@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
+import Sqld.Core (Cte(..), Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..))
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -107,25 +107,70 @@ inlineLiteral LitNull        = "NULL"
 -- ---------------------------------------------------------------------------
 
 formatQuery :: Layout -> Query -> WithBindings String
-formatQuery layout q state0 = Tuple sql s8
+formatQuery layout q state0 = Tuple sql s3
   where
   Tuple withSql    s1 = formatWith    layout q.with    state0
-  Tuple selectSql  s2 = formatSelect  layout q.select  s1
-  Tuple fromSql    s3 = formatFrom    layout q.from    s2
-  Tuple joinsSql   s4 = formatJoins   layout q.joins   s3
-  Tuple whereSql   s5 = formatWhere   layout q.where_  s4
-  Tuple groupBySql s6 = formatGroupBy layout q.groupBy s5
-  Tuple havingSql  s7 = formatHaving  layout q.having  s6
-  Tuple orderBySql s8 = formatOrderBy layout q.orderBy s7
+  Tuple bodySql    s2 = formatBody    layout q         s1
+  Tuple orderBySql s3 = formatOrderBy layout q.orderBy s2
 
   limitSql  = formatLimit  q.limit
   offsetSql = formatOffset q.offset
 
   parts = Array.filter (_ /= mempty)
-    [ withSql, selectSql, fromSql, joinsSql, whereSql
-    , groupBySql, havingSql, orderBySql, limitSql, offsetSql ]
+    [ withSql, bodySql, orderBySql, limitSql, offsetSql ]
 
   sql = intercalate (clauseSep layout) parts
+
+-- | The rows a query produces: a single `SELECT`, or two of them combined by a
+-- | set operation.
+-- |
+-- | `WITH`, `ORDER BY`, `LIMIT` and `OFFSET` sit outside the body, which is
+-- | what makes them apply to the combined result rather than to the last
+-- | operand.
+formatBody :: Layout -> Query -> WithBindings String
+formatBody layout q state = case q.setOp of
+  Nothing -> formatSelectBody layout q state
+  Just so -> formatSetOperation layout so state
+
+formatSelectBody :: Layout -> Query -> WithBindings String
+formatSelectBody layout q state0 = Tuple sql s6
+  where
+  Tuple selectSql  s1 = formatSelect  layout q.select  state0
+  Tuple fromSql    s2 = formatFrom    layout q.from    s1
+  Tuple joinsSql   s3 = formatJoins   layout q.joins   s2
+  Tuple whereSql   s4 = formatWhere   layout q.where_  s3
+  Tuple groupBySql s5 = formatGroupBy layout q.groupBy s4
+  Tuple havingSql  s6 = formatHaving  layout q.having  s5
+
+  parts = Array.filter (_ /= mempty)
+    [ selectSql, fromSql, joinsSql, whereSql, groupBySql, havingSql ]
+
+  sql = intercalate (clauseSep layout) parts
+
+-- | `(left) UNION ALL (right)`.
+-- |
+-- | Both operands are bracketed, so the meaning does not depend on
+-- | PostgreSQL's precedence between the set operators, and an operand keeps any
+-- | `ORDER BY` and `LIMIT` of its own.
+formatSetOperation :: Layout -> SetOperation -> WithBindings String
+formatSetOperation layout (SetOperation so) state =
+  Tuple (leftSql <> sep <> keyword <> sep <> rightSql) s2
+  where
+  sep     = clauseSep layout
+  keyword = setOpKeyword so.op <> if so.all then " ALL" else mempty
+
+  Tuple leftSql  s1 = formatOperand layout so.left  state
+  Tuple rightSql s2 = formatOperand layout so.right s1
+
+formatOperand :: Layout -> Query -> WithBindings String
+formatOperand layout q state = Tuple (parenthesise layout sql) s'
+  where
+  Tuple sql s' = formatQuery (nest layout) q state
+
+setOpKeyword :: SetOp -> String
+setOpKeyword Union     = "UNION"
+setOpKeyword Intersect = "INTERSECT"
+setOpKeyword Except    = "EXCEPT"
 
 -- ---------------------------------------------------------------------------
 -- Clause formatters

@@ -107,8 +107,46 @@ newtype Cte = Cte
   , query     :: Query
   }
 
+-- | How two result sets are combined. `ALL` is a flag on `SetOperation` rather
+-- | than three more constructors here, so `UNION` and `UNION ALL` stay one
+-- | operator with two spellings.
+data SetOp
+  = Union
+  | Intersect
+  | Except
+
+derive instance Eq SetOp
+
+-- | Two result sets combined: `left UNION right`, and so on.
+-- |
+-- | A `newtype` for the same reason as `Cte`: it closes a cycle through
+-- | `Query`, which a record synonym cannot express.
+-- |
+-- | Both operands are complete queries, and both are bracketed when emitted.
+-- | That makes a chain unambiguous whatever PostgreSQL's own precedence between
+-- | `UNION` and `INTERSECT` happens to be, and it leaves each operand its own
+-- | `ORDER BY` and `LIMIT`. The `ORDER BY`, `LIMIT` and `OFFSET` of the `Query`
+-- | that *holds* the `SetOperation` fall outside the brackets, so they apply to
+-- | the combined result.
+newtype SetOperation = SetOperation
+  { op    :: SetOp
+  , all   :: Boolean
+  , left  :: Query
+  , right :: Query
+  }
+
+-- | A `SELECT` statement.
+-- |
+-- | `setOp` is what makes a query a set operation rather than a single
+-- | `SELECT`. When it is present the operands supply the rows, so this record's
+-- | `select`, `from`, `joins`, `where_`, `groupBy` and `having` have nothing to
+-- | emit; `with`, `orderBy`, `limit` and `offset` still do, and apply to the
+-- | combined result. The `Sqld.Select` builders start such a query from
+-- | `emptyQuery`, so the unused fields stay empty — applying `select` or `from`
+-- | to a set operation afterwards has no effect on the SQL.
 type Query =
   { with    :: Array Cte
+  , setOp   :: Maybe SetOperation
   , select  :: Array SelectExpr
   , from    :: Maybe Relation
   , joins   :: Array Join
@@ -123,6 +161,7 @@ type Query =
 emptyQuery :: Query
 emptyQuery =
   { with:    []
+  , setOp:   Nothing
   , select:  []
   , from:    Nothing
   , joins:   []

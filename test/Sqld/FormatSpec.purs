@@ -4,7 +4,7 @@ import Prelude (Unit, discard, (#))
 import Data.String (trim)
 import Sqld.Expr (and, bool, col, countStar, exists, inSub, int, null, raw, str, sub, tcol, (.==))
 import Sqld.Format (formatInline, formatPretty)
-import Sqld.Select (as, cols, expr, from, fromAs, fromSub, leftJoin, select', star, starFrom, where_, with_)
+import Sqld.Select (as, asc, cols, except, expr, from, fromAs, fromSub, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -203,6 +203,52 @@ WITH "paid" AS (
 )
 SELECT *
 FROM "paid"
+"""
+
+    it "set operation: one operand block per line" do
+      let query = select' (cols ["id"])
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # unionAll (select' (cols ["user_id"]) # from "orders")
+            # orderBy [asc (col "id")]
+            # formatPretty
+      query `shouldEqual` trim """
+(
+  SELECT "id"
+  FROM "users"
+  WHERE "active" = TRUE
+)
+UNION ALL
+(
+  SELECT "user_id"
+  FROM "orders"
+)
+ORDER BY "id" ASC
+"""
+
+    it "set operation: a chained operand indents one level further" do
+      let query = select' (cols ["id"])
+            # from "a"
+            # union (select' (cols ["id"]) # from "b")
+            # except (select' (cols ["id"]) # from "c")
+            # formatPretty
+      query `shouldEqual` trim """
+(
+  (
+    SELECT "id"
+    FROM "a"
+  )
+  UNION
+  (
+    SELECT "id"
+    FROM "b"
+  )
+)
+EXCEPT
+(
+  SELECT "id"
+  FROM "c"
+)
 """
 
     it "leaves formatInline on one line" do
