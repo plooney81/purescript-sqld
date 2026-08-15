@@ -33,14 +33,12 @@ workspace:
 ## Quick start
 
 ```purescript
-import Sqld.Core (emptyQuery)
 import Sqld.Expr
 import Sqld.Format (format)
 import Sqld.Select
 
 -- SELECT "id", "name" FROM "users" WHERE "id" = $1
-query = format $ emptyQuery
-  # select (cols ["id", "name"])
+query = format $ select' (cols ["id", "name"])
   # from "users"
   # where_ (col "id" .== int 42)
 
@@ -78,7 +76,9 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 ### Building a query
 
-Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
+Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
+`emptyQuery` when a query has no select list of its own — a reusable
+`Query -> Query` fragment, or the right-hand side of `mergeQueries`:
 
 | Function | Description |
 |---|---|
@@ -193,13 +193,11 @@ A subquery in `FROM`. The alias is a plain `String` rather than a `Maybe`,
 because PostgreSQL rejects a `FROM` subquery without one:
 
 ```purescript
-recent = emptyQuery
-  # select [star]
+recent = select' [star]
   # from "orders"
   # where_ (col "status" .== str "paid")
 
-emptyQuery
-  # select [starFrom "recent"]
+select' [starFrom "recent"]
   # fromSub recent "recent"
   # where_ (col "recent.total" .> int 100)
 -- SELECT "recent".* FROM (SELECT * FROM "orders" WHERE "status" = $1) AS "recent"
@@ -211,8 +209,7 @@ derived table's bindings come before the outer query's. Use `joinOn` with
 `derived` to join against one:
 
 ```purescript
-emptyQuery
-  # select [star]
+select' [star]
   # fromAs "users" "u"
   # joinOn InnerJoin (derived totals "t") (col "u.id" .== col "t.user_id")
 ```
@@ -223,9 +220,8 @@ emptyQuery
 one, and the outer query treats each as an ordinary relation:
 
 ```purescript
-emptyQuery
-  # select [starFrom "recent"]
-  # with_ "recent" (emptyQuery # select [star] # from "orders" # where_ (col "status" .== str "paid"))
+select' [starFrom "recent"]
+  # with_ "recent" (select' [star] # from "orders" # where_ (col "status" .== str "paid"))
   # from "recent"
   # where_ (col "recent.total" .> int 100)
 -- WITH "recent" AS (SELECT * FROM "orders" WHERE "status" = $1)
@@ -241,8 +237,7 @@ the clause recursive and the others need no change. Use `withCte` with
 `cteColumns` to name a CTE's output columns:
 
 ```purescript
-emptyQuery
-  # select [star]
+select' [star]
   # withCte (cte "counting" body # cteColumns ["n"] # cteRecursive)
   # from "counting"
 -- WITH RECURSIVE "counting" ("n") AS (…) SELECT * FROM "counting"

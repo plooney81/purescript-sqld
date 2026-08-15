@@ -26,9 +26,9 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
+import Sqld.Core (Cte(..), Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, sum_, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, tcols, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -46,44 +46,41 @@ corpus = handWritten <> map asEntry Cookbook.cookbook
 handWritten :: Array CorpusEntry
 handWritten =
   [ { name: "select-star"
-    , query: emptyQuery # select [ star ] # from "users"
+    , query: select' [ star ] # from "users"
     }
 
   , { name: "select-columns"
-    , query: emptyQuery # select (cols [ "id", "name", "email" ]) # from "users"
+    , query: select' (cols [ "id", "name", "email" ]) # from "users"
     }
 
   , { name: "select-alias"
-    , query: emptyQuery # select [ as (col "created_at") "ts" ] # from "users"
+    , query: select' [ as (col "created_at") "ts" ] # from "users"
     }
 
   , { name: "select-col-alias-shorthand"
-    , query: emptyQuery # select [ colAs "created_at" "ts" ] # from "users"
+    , query: select' [ colAs "created_at" "ts" ] # from "users"
     }
 
   , { name: "select-qualified-columns"
-    , query: emptyQuery
-        # select [ expr (tcol "u" "id"), expr (tcol "u" "name") ]
+    , query: select' [ expr (tcol "u" "id"), expr (tcol "u" "name") ]
         # fromAs "users" "u"
     }
 
   , { name: "select-qualified-alias"
-    , query: emptyQuery
-        # select [ tcolAs "u" "created_at" "ts" ]
+    , query: select' [ tcolAs "u" "created_at" "ts" ]
         # fromAs "users" "u"
     }
 
   , { name: "select-star-from-alias"
-    , query: emptyQuery # select [ starFrom "u" ] # fromAs "users" "u"
+    , query: select' [ starFrom "u" ] # fromAs "users" "u"
     }
 
   , { name: "select-raw-expression"
-    , query: emptyQuery # select [ expr (raw "1 + 1") ]
+    , query: select' [ expr (raw "1 + 1") ]
     }
 
   , { name: "select-aggregate-alias"
-    , query: emptyQuery
-        # select [ expr (col "department"), as (raw "COUNT(*)") "n" ]
+    , query: select' [ expr (col "department"), as (raw "COUNT(*)") "n" ]
         # from "users"
         # groupBy [ col "department" ]
     }
@@ -91,30 +88,29 @@ handWritten =
   -- Literals -----------------------------------------------------------------
 
   , { name: "literal-int"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (col "id" .== int 42)
+    , query: select' [ star ] # from "users" # where_ (col "id" .== int 42)
     }
 
   , { name: "literal-string-with-quote"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (col "name" .!= str "O'Brien")
+    , query: select' [ star ] # from "users" # where_ (col "name" .!= str "O'Brien")
     }
 
   , { name: "literal-number"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (col "score" .>= num 4.5)
+    , query: select' [ star ] # from "users" # where_ (col "score" .>= num 4.5)
     }
 
   , { name: "literal-boolean"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (col "active" .== bool true)
+    , query: select' [ star ] # from "users" # where_ (col "active" .== bool true)
     }
 
   , { name: "literal-null"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (col "email" .== null)
+    , query: select' [ star ] # from "users" # where_ (col "email" .== null)
     }
 
   -- Comparison operators -----------------------------------------------------
 
   , { name: "comparison-operators"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_
             ( and
@@ -129,32 +125,29 @@ handWritten =
   -- Boolean combinators ------------------------------------------------------
 
   , { name: "boolean-or"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (or [ col "active" .== bool true, isNull (col "email") ])
     }
 
   , { name: "boolean-not"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (not (col "active" .== bool true))
     }
 
   , { name: "boolean-and-empty"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (and [])
+    , query: select' [ star ] # from "users" # where_ (and [])
     }
 
   , { name: "boolean-or-empty"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (or [])
+    , query: select' [ star ] # from "users" # where_ (or [])
     }
 
   -- Null tests ---------------------------------------------------------------
 
   , { name: "is-null-and-is-not-null"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (and [ isNull (col "email"), isNotNull (col "name") ])
     }
@@ -162,15 +155,13 @@ handWritten =
   -- Set membership -----------------------------------------------------------
 
   , { name: "in-list"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (in_ (col "department") [ str "engineering", str "sales" ])
     }
 
   , { name: "not-in-list"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (notIn (col "id") [ int 1, int 2, int 3 ])
     }
@@ -179,15 +170,13 @@ handWritten =
   -- which PostgreSQL rejects. These entries are here to prove that: without the
   -- fold, PREPARE fails on them.
   , { name: "in-list-empty"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (in_ (col "department") [])
     }
 
   , { name: "not-in-list-empty"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (notIn (col "id") [])
     }
@@ -195,8 +184,7 @@ handWritten =
   -- The folded constant under AND / OR / NOT — the positions where bracketing
   -- would change the meaning if it were not an atom.
   , { name: "in-list-empty-nested"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_
             ( and
@@ -210,18 +198,17 @@ handWritten =
   -- Pattern matching ---------------------------------------------------------
 
   , { name: "like"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (like (col "name") "A%")
+    , query: select' [ star ] # from "users" # where_ (like (col "name") "A%")
     }
 
   , { name: "ilike"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (ilike (col "email") "%@example.com")
+    , query: select' [ star ] # from "users" # where_ (ilike (col "email") "%@example.com")
     }
 
   -- Ranges -------------------------------------------------------------------
 
   , { name: "between"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (between (col "age") (int 18) (int 65))
     }
@@ -229,21 +216,19 @@ handWritten =
   -- Raw escape hatch ---------------------------------------------------------
 
   , { name: "where-raw"
-    , query: emptyQuery # select [ star ] # from "users" # where_ (raw "age % 2 = 0")
+    , query: select' [ star ] # from "users" # where_ (raw "age % 2 = 0")
     }
 
   -- Joins --------------------------------------------------------------------
 
   , { name: "inner-join"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "orders"
         # innerJoin "users" (tcol "orders" "user_id" .== tcol "users" "id")
     }
 
   , { name: "left-join-with-aliases"
-    , query: emptyQuery
-        # select [ expr (tcol "u" "id"), expr (tcol "p" "bio") ]
+    , query: select' [ expr (tcol "u" "id"), expr (tcol "p" "bio") ]
         # fromAs "users" "u"
         # leftJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
         # where_ (tcol "u" "active" .== bool true)
@@ -252,15 +237,13 @@ handWritten =
     }
 
   , { name: "right-join"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # rightJoin "profiles" (tcol "users" "id" .== tcol "profiles" "user_id")
     }
 
   , { name: "full-join"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # fromAs "users" "u"
         # fullJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
     }
@@ -268,8 +251,7 @@ handWritten =
   -- Grouping -----------------------------------------------------------------
 
   , { name: "group-by-having"
-    , query: emptyQuery
-        # select [ expr (col "department"), as (raw "COUNT(*)") "headcount" ]
+    , query: select' [ expr (col "department"), as (raw "COUNT(*)") "headcount" ]
         # from "users"
         # groupBy [ col "department" ]
         # having (raw "COUNT(*)" .> int 5)
@@ -279,19 +261,17 @@ handWritten =
   -- Ordering / pagination ----------------------------------------------------
 
   , { name: "order-by-asc"
-    , query: emptyQuery # select [ star ] # from "users" # orderBy [ asc (col "name") ]
+    , query: select' [ star ] # from "users" # orderBy [ asc (col "name") ]
     }
 
   , { name: "order-by-multiple"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # orderBy [ asc (col "department"), desc (col "created_at") ]
     }
 
   , { name: "limit-offset"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "articles"
         # orderBy [ desc (col "published_at") ]
         # limit 10
@@ -301,8 +281,7 @@ handWritten =
   -- Everything at once -------------------------------------------------------
 
   , { name: "kitchen-sink"
-    , query: emptyQuery
-        # select [ tcolAs "u" "id" "user_id", as (raw "COUNT(o.id)") "order_count" ]
+    , query: select' [ tcolAs "u" "id" "user_id", as (raw "COUNT(o.id)") "order_count" ]
         # fromAs "users" "u"
         # leftJoinAs "orders" "o" (tcol "u" "id" .== tcol "o" "user_id")
         # where_
@@ -322,31 +301,28 @@ handWritten =
   -- Function application (App) -----------------------------------------------
 
   , { name: "app-count-star"
-    , query: emptyQuery # select [ as countStar "n" ] # from "users"
+    , query: select' [ as countStar "n" ] # from "users"
     }
 
   , { name: "app-aggregates"
-    , query: emptyQuery
-        # select
-            [ expr (col "department")
-            , as (count (col "id")) "headcount"
-            , as (App "MAX" [ col "age" ]) "oldest"
-            ]
+    , query: select'
+        [ expr (col "department")
+        , as (count (col "id")) "headcount"
+        , as (App "MAX" [ col "age" ]) "oldest"
+        ]
         # from "users"
         # groupBy [ col "department" ]
     }
 
   , { name: "app-nested"
-    , query: emptyQuery
-        # select [ as (upper (coalesce [ col "email", str "none" ])) "email" ]
+    , query: select' [ as (upper (coalesce [ col "email", str "none" ])) "email" ]
         # from "users"
     }
 
   -- Operators (BinOp) --------------------------------------------------------
 
   , { name: "binop-concat"
-    , query: emptyQuery
-        # select [ as (binOp "||" (col "name") (col "department")) "label" ]
+    , query: select' [ as (binOp "||" (col "name") (col "department")) "label" ]
         # from "users"
     }
 
@@ -354,15 +330,13 @@ handWritten =
   -- precedence printer this renders as "age" + $1 * $2, which means something
   -- entirely different and which PostgreSQL would happily accept.
   , { name: "binop-arithmetic-precedence"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (binOp "*" (binOp "+" (col "age") (int 1)) (int 2) .> int 10)
     }
 
   , { name: "binop-not-like"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (and [ notLike (col "email") "%@spam.test", notILike (col "name") "test%" ])
     }
@@ -370,14 +344,12 @@ handWritten =
   -- Casts --------------------------------------------------------------------
 
   , { name: "cast-simple"
-    , query: emptyQuery
-        # select [ as (cast (col "id") "text") "id_text" ]
+    , query: select' [ as (cast (col "id") "text") "id_text" ]
         # from "users"
     }
 
   , { name: "cast-compound-operand"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_ (cast (binOp "+" (col "age") (int 1)) "numeric" .>= num 1.5)
     }
@@ -385,40 +357,35 @@ handWritten =
   -- Subqueries (Sub) ---------------------------------------------------------
 
   , { name: "sub-scalar-correlated"
-    , query: emptyQuery
-        # select
-            [ expr (tcol "u" "id")
-            , as
-                ( sub
-                    ( emptyQuery
-                        # select [ expr countStar ]
-                        # from "orders"
-                        # where_ (tcol "orders" "user_id" .== tcol "u" "id")
-                    )
+    , query: select'
+        [ expr (tcol "u" "id")
+        , as
+            ( sub
+                ( select' [ expr countStar ]
+                    # from "orders"
+                    # where_ (tcol "orders" "user_id" .== tcol "u" "id")
                 )
-                "order_count"
-            ]
+            )
+            "order_count"
+        ]
         # fromAs "users" "u"
     }
 
   , { name: "sub-in"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_
             ( inSub (col "id")
-                (emptyQuery # select [ expr (col "user_id") ] # from "orders")
+                (select' [ expr (col "user_id") ] # from "orders")
             )
     }
 
   , { name: "sub-not-in"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # from "users"
         # where_
             ( notInSub (col "id")
-                ( emptyQuery
-                    # select [ expr (col "user_id") ]
+                ( select' [ expr (col "user_id") ]
                     # from "orders"
                     # where_ (col "status" .== str "cancelled")
                 )
@@ -426,13 +393,11 @@ handWritten =
     }
 
   , { name: "sub-exists"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # fromAs "users" "u"
         # where_
             ( exists
-                ( emptyQuery
-                    # select [ expr (raw "1") ]
+                ( select' [ expr (raw "1") ]
                     # from "orders"
                     # where_ (tcol "orders" "user_id" .== tcol "u" "id")
                 )
@@ -440,13 +405,11 @@ handWritten =
     }
 
   , { name: "sub-not-exists"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # fromAs "users" "u"
         # where_
             ( notExists
-                ( emptyQuery
-                    # select [ expr (raw "1") ]
+                ( select' [ expr (raw "1") ]
                     # from "orders"
                     # where_ (tcol "orders" "user_id" .== tcol "u" "id")
                 )
@@ -456,8 +419,7 @@ handWritten =
   -- Select-list composition ---------------------------------------------------
 
   , { name: "mixed-select-list"
-    , query: emptyQuery
-        # select (cols [ "department" ] <> exprs [ avg (col "age") ] <> [ as countStar "headcount" ])
+    , query: select' (cols [ "department" ] <> exprs [ avg (col "age") ] <> [ as countStar "headcount" ])
         # from "users"
         # groupBy [ col "department" ]
     }
@@ -465,16 +427,14 @@ handWritten =
   -- Dot-qualified column references ------------------------------------------
 
   , { name: "dotted-column-references"
-    , query: emptyQuery
-        # select (cols [ "orders.id", "users.name" ])
+    , query: select' (cols [ "orders.id", "users.name" ])
         # from "orders"
         # innerJoin "users" (col "orders.user_id" .== col "users.id")
         # where_ (col "orders.status" .== str "paid")
     }
 
   , { name: "dotted-column-references-aliased"
-    , query: emptyQuery
-        # select (tcols "u" [ "id", "name" ] <> cols [ "p.bio" ])
+    , query: select' (tcols "u" [ "id", "name" ] <> cols [ "p.bio" ])
         # fromAs "users" "u"
         # leftJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
     }
@@ -482,11 +442,9 @@ handWritten =
   -- Derived tables -----------------------------------------------------------
 
   , { name: "derived-table"
-    , query: emptyQuery
-        # select [ starFrom "recent" ]
+    , query: select' [ starFrom "recent" ]
         # fromSub
-            ( emptyQuery
-                # select (cols [ "id", "user_id", "total" ])
+            ( select' (cols [ "id", "user_id", "total" ])
                 # from "orders"
                 # where_ (col "status" .== str "paid")
             )
@@ -494,13 +452,11 @@ handWritten =
     }
 
   , { name: "derived-table-aggregate"
-    , query: emptyQuery
-        # select [ expr (tcol "u" "name"), expr (tcol "totals" "order_count") ]
+    , query: select' [ expr (tcol "u" "name"), expr (tcol "totals" "order_count") ]
         # fromAs "users" "u"
         # joinOn InnerJoin
             ( derived
-                ( emptyQuery
-                    # select [ expr (col "user_id"), as countStar "order_count" ]
+                ( select' [ expr (col "user_id"), as countStar "order_count" ]
                     # from "orders"
                     # groupBy [ col "user_id" ]
                 )
@@ -512,11 +468,9 @@ handWritten =
   -- A derived table's parameters sit earlier in the SQL than the outer
   -- WHERE's, so they must be numbered first.
   , { name: "derived-table-parameter-ordering"
-    , query: emptyQuery
-        # select [ starFrom "recent" ]
+    , query: select' [ starFrom "recent" ]
         # fromSub
-            ( emptyQuery
-                # select (cols [ "id", "user_id", "total" ])
+            ( select' (cols [ "id", "user_id", "total" ])
                 # from "orders"
                 # where_ (col "status" .== str "paid")
             )
@@ -527,11 +481,9 @@ handWritten =
   -- Common table expressions --------------------------------------------------
 
   , { name: "with-cte"
-    , query: emptyQuery
-        # select [ starFrom "recent" ]
+    , query: select' [ starFrom "recent" ]
         # with_ "recent"
-            ( emptyQuery
-                # select [ star ]
+            ( select' [ star ]
                 # from "orders"
                 # where_ (col "status" .== str "paid")
             )
@@ -541,17 +493,14 @@ handWritten =
   -- A later CTE may reference an earlier one, and the outer query treats both
   -- as ordinary relations.
   , { name: "with-cte-multiple"
-    , query: emptyQuery
-        # select [ expr (tcol "u" "name"), expr (tcol "spend" "total") ]
+    , query: select' [ expr (tcol "u" "name"), expr (tcol "spend" "total") ]
         # with_ "paid"
-            ( emptyQuery
-                # select (cols [ "user_id", "total" ])
+            ( select' (cols [ "user_id", "total" ])
                 # from "orders"
                 # where_ (col "status" .== str "paid")
             )
         # with_ "spend"
-            ( emptyQuery
-                # select (cols [ "user_id" ] <> [ as (sum_ (col "total")) "total" ])
+            ( select' (cols [ "user_id" ] <> [ as (sum_ (col "total")) "total" ])
                 # from "paid"
                 # groupBy [ col "user_id" ]
             )
@@ -560,13 +509,11 @@ handWritten =
     }
 
   , { name: "with-cte-column-list"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # withCte
             ( cteColumns [ "user_id", "spend" ]
                 ( cte "totals"
-                    ( emptyQuery
-                        # select (exprs [ col "user_id", sum_ (col "total") ])
+                    ( select' (exprs [ col "user_id", sum_ (col "total") ])
                         # from "orders"
                         # groupBy [ col "user_id" ]
                     )
@@ -578,11 +525,9 @@ handWritten =
   -- A CTE's parameters sit ahead of every other clause in the emitted SQL, so
   -- they are numbered first.
   , { name: "with-cte-parameter-ordering"
-    , query: emptyQuery
-        # select [ starFrom "recent" ]
+    , query: select' [ starFrom "recent" ]
         # with_ "recent"
-            ( emptyQuery
-                # select (cols [ "id", "user_id", "total" ])
+            ( select' (cols [ "id", "user_id", "total" ])
                 # from "orders"
                 # where_ (col "status" .== str "paid")
             )
@@ -595,11 +540,9 @@ handWritten =
   -- The entry earns its place regardless: it proves PostgreSQL accepts what
   -- the WITH clause itself emits for a genuinely self-referencing CTE.
   , { name: "with-recursive"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # withRecursive "counting"
-            ( emptyQuery
-                # select [ expr (raw "1 AS \"n\" UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
+            ( select' [ expr (raw "1 AS \"n\" UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
             )
         # from "counting"
     }
@@ -607,11 +550,9 @@ handWritten =
   -- RECURSIVE is a property of the clause, not the entry: one recursive CTE
   -- makes the whole WITH recursive, and the non-recursive one still works.
   , { name: "with-recursive-mixed"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # with_ "paid"
-            ( emptyQuery
-                # select (cols [ "user_id" ])
+            ( select' (cols [ "user_id" ])
                 # from "orders"
                 # where_ (col "status" .== str "paid")
             )
@@ -619,8 +560,7 @@ handWritten =
             ( cteRecursive
                 ( cteColumns [ "n" ]
                     ( cte "counting"
-                        ( emptyQuery
-                            # select [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
+                        ( select' [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
                         )
                     )
                 )
@@ -631,15 +571,13 @@ handWritten =
 
   -- Subquery parameters must keep numbering in step with the outer query.
   , { name: "sub-parameter-ordering"
-    , query: emptyQuery
-        # select [ star ]
+    , query: select' [ star ]
         # fromAs "users" "u"
         # where_
             ( and
                 [ tcol "u" "active" .== bool true
                 , exists
-                    ( emptyQuery
-                        # select [ expr (raw "1") ]
+                    ( select' [ expr (raw "1") ]
                         # from "orders"
                         # where_
                             ( and

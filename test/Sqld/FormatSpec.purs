@@ -2,10 +2,9 @@ module Test.Sqld.FormatSpec where
 
 import Prelude (Unit, discard, (#))
 import Data.String (trim)
-import Sqld.Core (emptyQuery)
 import Sqld.Expr (and, bool, col, countStar, exists, inSub, int, null, raw, str, sub, tcol, (.==))
 import Sqld.Format (formatInline, formatPretty)
-import Sqld.Select (as, cols, expr, from, fromAs, fromSub, leftJoin, select, star, starFrom, where_, with_)
+import Sqld.Select (as, cols, expr, from, fromAs, fromSub, leftJoin, select', star, starFrom, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -14,32 +13,28 @@ formatSpec = describe "Sqld.Format" do
 
   describe "value rendering" do
     it "integer" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # from "t"
             # where_ (col "id" .== int 42)
             # formatInline
       query `shouldEqual` "SELECT * FROM \"t\" WHERE \"id\" = 42"
 
     it "string with single-quote escaping" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # from "t"
             # where_ (col "name" .== str "O'Brien")
             # formatInline
       query `shouldEqual` "SELECT * FROM \"t\" WHERE \"name\" = 'O''Brien'"
 
     it "TRUE / FALSE" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # from "t"
             # where_ (col "active" .== bool true)
             # formatInline
       query `shouldEqual` "SELECT * FROM \"t\" WHERE \"active\" = TRUE"
 
     it "NULL" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # from "t"
             # where_ (col "x" .== null)
             # formatInline
@@ -47,16 +42,14 @@ formatSpec = describe "Sqld.Format" do
 
   describe "substitution order" do
     it "left-to-right across the whole query" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # from "t"
             # where_ (and [col "a" .== int 1, col "b" .== str "x", col "c" .== bool false])
             # formatInline
       query `shouldEqual` "SELECT * FROM \"t\" WHERE (\"a\" = 1 AND \"b\" = 'x' AND \"c\" = FALSE)"
 
     it "JOIN ON values come before WHERE values" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # from "orders"
             # leftJoin "users" (col "user_id" .== int 99)
             # where_ (col "status" .== str "open")
@@ -66,8 +59,7 @@ formatSpec = describe "Sqld.Format" do
 
   describe "formatPretty" do
     it "clause per line" do
-      let query = emptyQuery
-            # select (cols ["id", "name"])
+      let query = select' (cols ["id", "name"])
             # from "users"
             # where_ (col "id" .== int 42)
             # formatPretty
@@ -78,19 +70,17 @@ WHERE "id" = 42
 """
 
     it "scalar subquery in the select list" do
-      let query = emptyQuery
-            # select
-                [ expr (tcol "u" "name")
-                , as
-                    ( sub
-                        ( emptyQuery
-                            # select [expr countStar]
-                            # from "orders"
-                            # where_ (tcol "orders" "user_id" .== tcol "u" "id")
-                        )
+      let query = select'
+            [ expr (tcol "u" "name")
+            , as
+                ( sub
+                    ( select' [expr countStar]
+                        # from "orders"
+                        # where_ (tcol "orders" "user_id" .== tcol "u" "id")
                     )
-                    "order_count"
-                ]
+                )
+                "order_count"
+            ]
             # fromAs "users" "u"
             # formatPretty
       query `shouldEqual` trim """
@@ -103,13 +93,11 @@ FROM "users" AS "u"
 """
 
     it "EXISTS subquery" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # fromAs "users" "u"
             # where_
                 ( exists
-                    ( emptyQuery
-                        # select [expr (raw "1")]
+                    ( select' [expr (raw "1")]
                         # from "orders"
                         # where_ (tcol "orders" "user_id" .== tcol "u" "id")
                     )
@@ -126,11 +114,9 @@ WHERE EXISTS (
 """
 
     it "derived table in FROM" do
-      let query = emptyQuery
-            # select [starFrom "paid"]
+      let query = select' [starFrom "paid"]
             # fromSub
-                ( emptyQuery
-                    # select (cols ["id", "total"])
+                ( select' (cols ["id", "total"])
                     # from "orders"
                     # where_ (col "status" .== str "paid")
                 )
@@ -146,16 +132,13 @@ FROM (
 """
 
     it "indents one level per level of nesting" do
-      let query = emptyQuery
-            # select [starFrom "t"]
+      let query = select' [starFrom "t"]
             # fromSub
-                ( emptyQuery
-                    # select (cols ["id"])
+                ( select' (cols ["id"])
                     # from "orders"
                     # where_
                         ( inSub (col "user_id")
-                            ( emptyQuery
-                                # select (cols ["id"])
+                            ( select' (cols ["id"])
                                 # from "users"
                                 # where_ (col "active" .== bool true)
                             )
@@ -177,11 +160,9 @@ FROM (
 """
 
     it "CTE body gets an indented block of its own" do
-      let query = emptyQuery
-            # select [starFrom "paid"]
+      let query = select' [starFrom "paid"]
             # with_ "paid"
-                ( emptyQuery
-                    # select (cols ["id", "total"])
+                ( select' (cols ["id", "total"])
                     # from "orders"
                     # where_ (col "status" .== str "paid")
                 )
@@ -198,17 +179,14 @@ FROM "paid"
 """
 
     it "one CTE per line" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # with_ "paid"
-                ( emptyQuery
-                    # select (cols ["user_id"])
+                ( select' (cols ["user_id"])
                     # from "orders"
                     # where_ (col "status" .== str "paid")
                 )
             # with_ "recent"
-                ( emptyQuery
-                    # select (cols ["user_id"])
+                ( select' (cols ["user_id"])
                     # from "orders"
                 )
             # from "paid"
@@ -228,12 +206,11 @@ FROM "paid"
 """
 
     it "leaves formatInline on one line" do
-      let query = emptyQuery
-            # select [star]
+      let query = select' [star]
             # from "users"
             # where_
                 ( inSub (col "id")
-                    (emptyQuery # select (cols ["user_id"]) # from "orders")
+                    (select' (cols ["user_id"]) # from "orders")
                 )
             # formatInline
       query `shouldEqual`
@@ -241,8 +218,7 @@ FROM "paid"
 
   describe "integration" do
     it "multi-column select with WHERE" do
-      let query = emptyQuery
-            # select (cols ["id", "name", "email"])
+      let query = select' (cols ["id", "name", "email"])
             # from "users"
             # where_ (col "id" .== int 42)
             # formatInline
