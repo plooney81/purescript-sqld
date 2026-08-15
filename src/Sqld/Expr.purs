@@ -146,11 +146,21 @@ isNotNull = Postfix "IS NOT NULL"
 -- Set membership
 -- ---------------------------------------------------------------------------
 
+-- | `e IN (a, b, …)`.
+-- |
+-- | An empty candidate list folds to `FALSE`: nothing is a member of the empty
+-- | set, and `IN ()` is a syntax error PostgreSQL rejects. `Or []` is that
+-- | constant — it already renders as the bare keyword `FALSE`, which is an atom
+-- | the precedence printer never needs to bracket.
 in_ :: Expr -> Array Expr -> Expr
-in_ e = BinOp "IN" e <<< Row
+in_ _ [] = Or []
+in_ e xs = BinOp "IN" e (Row xs)
 
+-- | `e NOT IN (a, b, …)`. The mirror of `in_`: an empty candidate list folds to
+-- | `TRUE`, since everything is a non-member of the empty set.
 notIn :: Expr -> Array Expr -> Expr
-notIn e = BinOp "NOT IN" e <<< Row
+notIn _ [] = And []
+notIn e xs = BinOp "NOT IN" e (Row xs)
 
 -- | `e IN (SELECT …)`.
 inSub :: Expr -> Query -> Expr

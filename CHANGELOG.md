@@ -63,3 +63,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `select` is now additive — calling it multiple times appends to the select list rather than replacing it
 - Table aliases now render with explicit `AS` keyword (`FROM "users" AS "u"` instead of `FROM "users" "u"`)
 - Implicit `SELECT *` removed — use `select [star]` explicitly
+
+### Fixed
+- `in_` with an empty candidate list folds to `FALSE`, and `notIn` to `TRUE`, instead of emitting `IN ()` / `NOT IN ()` — a syntax error PostgreSQL rejects at execution time rather than at the call site. An empty list arises naturally when a filter is driven by user input. The fold happens in `Sqld.Expr`, so `Row []` stays representable for anyone building the AST directly, and the constant is a bare keyword, so it needs no bracketing under `AND` / `OR` / `NOT`. Non-empty lists and `inSub` / `notInSub` are unchanged

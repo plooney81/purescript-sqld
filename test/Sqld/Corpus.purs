@@ -175,6 +175,38 @@ handWritten =
         # where_ (notIn (col "id") [ int 1, int 2, int 3 ])
     }
 
+  -- An empty candidate list folds to a constant rather than emitting `IN ()`,
+  -- which PostgreSQL rejects. These entries are here to prove that: without the
+  -- fold, PREPARE fails on them.
+  , { name: "in-list-empty"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_ (in_ (col "department") [])
+    }
+
+  , { name: "not-in-list-empty"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_ (notIn (col "id") [])
+    }
+
+  -- The folded constant under AND / OR / NOT — the positions where bracketing
+  -- would change the meaning if it were not an atom.
+  , { name: "in-list-empty-nested"
+    , query: emptyQuery
+        # select [ star ]
+        # from "users"
+        # where_
+            ( and
+                [ col "active" .== bool true
+                , or [ in_ (col "department") [], notIn (col "id") [] ]
+                , not (in_ (col "email") [])
+                ]
+            )
+    }
+
   -- Pattern matching ---------------------------------------------------------
 
   , { name: "like"
