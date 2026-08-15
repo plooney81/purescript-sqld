@@ -22,8 +22,8 @@ module Example.Cookbook
 import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
-import Sqld.Core (JoinType(..), Query, emptyQuery)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, num, or, raw, str, sub, sum_, (.<), (.==), (.>), (.>=))
+import Sqld.Core (JoinType(..), Query, Window, emptyQuery, emptyWindow)
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, over, raw, rows, rowNumber, str, sub, sum_, unboundedPreceding, (.<), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
@@ -133,6 +133,38 @@ aggregation =
     # groupBy [ col "department" ]
     # having (countStar .> int 3)
     # orderBy [ desc (col "headcount") ]
+
+-- #example window-functions
+-- # Window functions
+-- `over` evaluates an aggregate — or a window-only function such as
+-- `rowNumber`, `rank` or `lag` — across a set of rows related to the current
+-- one, without collapsing them the way `groupBy` does. Every row survives, and
+-- each carries its own answer.
+--
+-- A `Window` is a plain record, so windows compose by record update: `byUser`
+-- names the partition once, and each column below adds the ordering or frame it
+-- needs. `frame` is what turns an ordered sum into a running one — here, every
+-- row from the start of the partition up to the current one.
+windowFunctions :: Query
+windowFunctions =
+  select'
+    ( cols [ "user_id", "placed_at", "total" ] <>
+        [ as (rowNumber `over` byUser { orderBy = [ desc (col "total") ] }) "biggest_first"
+        , as (lag (col "total") 1 `over` chronological) "previous_total"
+        , as (sum_ (col "total") `over` runningTotal) "running_total"
+        ]
+    )
+    # from "orders"
+    # where_ (col "status" .== str "paid")
+
+byUser :: Window
+byUser = emptyWindow { partitionBy = [ col "user_id" ] }
+
+chronological :: Window
+chronological = byUser { orderBy = [ asc (col "placed_at") ] }
+
+runningTotal :: Window
+runningTotal = chronological { frame = Just (rows unboundedPreceding currentRow) }
 
 -- #example functions-and-casts
 -- # Functions, casts and arbitrary operators
@@ -407,6 +439,7 @@ cookbook =
   , { name: "right-join",           query: rightJoinExample }
   , { name: "full-join",            query: fullJoinExample }
   , { name: "aggregation",          query: aggregation }
+  , { name: "window-functions",     query: windowFunctions }
   , { name: "functions-and-casts",  query: functionsAndCasts }
   , { name: "exists",               query: existsExample }
   , { name: "not-exists",           query: notExistsExample }

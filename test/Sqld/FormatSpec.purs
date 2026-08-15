@@ -1,10 +1,12 @@
 module Test.Sqld.FormatSpec where
 
-import Prelude (Unit, discard, (#))
+import Prelude (Unit, discard, (#), (<>))
+import Data.Maybe (Maybe(..))
 import Data.String (trim)
-import Sqld.Expr (and, bool, col, countStar, exists, inSub, int, null, raw, str, sub, tcol, (.==))
+import Sqld.Core (emptyWindow)
+import Sqld.Expr (and, bool, col, countStar, currentRow, exists, inSub, int, null, over, raw, rows, rowNumber, str, sub, tcol, unboundedPreceding, (.==))
 import Sqld.Format (formatInline, formatPretty)
-import Sqld.Select (as, asc, cols, except, expr, from, fromAs, fromSub, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
+import Sqld.Select (as, asc, cols, desc, except, expr, from, fromAs, fromSub, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -249,6 +251,24 @@ EXCEPT
   SELECT "id"
   FROM "c"
 )
+"""
+
+    -- A window is part of an expression rather than a clause of its own, so it
+    -- stays on one line however deeply the query is broken up.
+    it "a window stays on one line" do
+      let window = emptyWindow
+            { partitionBy = [col "department"]
+            , orderBy = [desc (col "age")]
+            , frame = Just (rows unboundedPreceding currentRow)
+            }
+          query = select' (cols ["name"] <> [as (rowNumber `over` window) "rn"])
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # formatPretty
+      query `shouldEqual` trim """
+SELECT "name", ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "rn"
+FROM "users"
+WHERE "active" = TRUE
 """
 
     it "leaves formatInline on one line" do

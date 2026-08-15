@@ -1,10 +1,11 @@
 module Test.Sqld.ExprSpec where
 
 import Prelude (Unit, discard, (#))
-import Sqld.Core (Literal(..))
-import Sqld.Expr (and, between, binOp, bool, cast, coalesce, col, count, countStar, exists, in_, inSub, int, isNotNull, isNull, like, not, notIn, or, raw, str, sub, upper, (.!=), (.==), (.>), (.>=))
+import Data.Maybe (Maybe(..))
+import Sqld.Core (FrameMode(..), Literal(..), emptyWindow)
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, over, preceding, range, rank, raw, rows, rowNumber, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, (.!=), (.==), (.>), (.>=))
 import Sqld.Format (format, formatInline)
-import Sqld.Select (as, expr, from, select', star, where_)
+import Sqld.Select (as, asc, cols, desc, expr, from, orderBy, select', star, where_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -304,3 +305,124 @@ exprSpec = describe "Sqld.Expr" do
       result.sql `shouldEqual`
         "SELECT * FROM \"users\" WHERE (\"active\" = $1 AND \"id\" IN (SELECT \"user_id\" FROM \"orders\" WHERE \"status\" = $2) AND \"age\" > $3)"
       result.params `shouldEqual` [LitBoolean true, LitString "paid", LitInt 21]
+
+  describe "window functions" do
+    it "PARTITION BY and ORDER BY" do
+      let query = select' [as (rowNumber `over` emptyWindow
+                                  { partitionBy = [col "department"]
+                                  , orderBy = [desc (col "age")]
+                                  }) "rn"]
+            # from "users"
+            # formatInline
+      query `shouldEqual`
+        "SELECT ROW_NUMBER() OVER (PARTITION BY \"department\" ORDER BY \"age\" DESC) AS \"rn\" FROM \"users\""
+
+    -- OVER () is valid SQL: one partition, unordered.
+    it "an empty window is OVER ()" do
+      let query = select' [as (countStar `over` emptyWindow) "total"]
+            # from "users"
+            # formatInline
+      query `shouldEqual` "SELECT COUNT(*) OVER () AS \"total\" FROM \"users\""
+
+    it "PARTITION BY alone" do
+      let query = select' [as (rank `over` emptyWindow { partitionBy = [col "department"] }) "r"]
+            # from "users"
+            # formatInline
+      query `shouldEqual`
+        "SELECT RANK() OVER (PARTITION BY \"department\") AS \"r\" FROM \"users\""
+
+    it "ORDER BY alone" do
+      let query = select' [as (denseRank `over` emptyWindow { orderBy = [asc (col "score")] }) "r"]
+            # from "users"
+            # formatInline
+      query `shouldEqual`
+        "SELECT DENSE_RANK() OVER (ORDER BY \"score\" ASC) AS \"r\" FROM \"users\""
+
+    it "an aggregate over a window" do
+      let query = select' [as (sum_ (col "total") `over` emptyWindow
+                                  { partitionBy = [col "user_id"] }) "user_total"]
+            # from "orders"
+            # formatInline
+      query `shouldEqual`
+        "SELECT SUM(\"total\") OVER (PARTITION BY \"user_id\") AS \"user_total\" FROM \"orders\""
+
+    it "lag and lead take an offset" do
+      let window = emptyWindow { orderBy = [asc (col "placed_at")] }
+          query = select' [ as (lag (col "total") 1 `over` window) "prev"
+                          , as (lead (col "total") 2 `over` window) "next"
+                          ]
+            # from "orders"
+            # formatInline
+      query `shouldEqual`
+        "SELECT LAG(\"total\", 1) OVER (ORDER BY \"placed_at\" ASC) AS \"prev\", LEAD(\"total\", 2) OVER (ORDER BY \"placed_at\" ASC) AS \"next\" FROM \"orders\""
+
+    it "frames: ROWS BETWEEN" do
+      let query = select' [as (sum_ (col "total") `over` emptyWindow
+                                  { orderBy = [asc (col "placed_at")]
+                                  , frame = Just (rows unboundedPreceding currentRow)
+                                  }) "running"]
+            # from "orders"
+            # formatInline
+      query `shouldEqual`
+        "SELECT SUM(\"total\") OVER (ORDER BY \"placed_at\" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS \"running\" FROM \"orders\""
+
+    -- Offsets are emitted literally: a frame carries no parameters.
+    it "frames: offset bounds" do
+      let result = select' [as (avg (col "total") `over` emptyWindow
+                                   { orderBy = [asc (col "placed_at")]
+                                   , frame = Just (rows (preceding 3) (following 1))
+                                   }) "moving"]
+            # from "orders"
+            # format
+      result.sql `shouldEqual`
+        "SELECT AVG(\"total\") OVER (ORDER BY \"placed_at\" ASC ROWS BETWEEN 3 PRECEDING AND 1 FOLLOWING) AS \"moving\" FROM \"orders\""
+      result.params `shouldEqual` []
+
+    it "frames: RANGE and GROUPS" do
+      let window f = emptyWindow { orderBy = [asc (col "placed_at")], frame = Just f }
+          rendered f = formatInline (select' [as (sum_ (col "total") `over` window f) "t"] # from "orders")
+      rendered (range currentRow unboundedFollowing) `shouldEqual`
+        "SELECT SUM(\"total\") OVER (ORDER BY \"placed_at\" ASC RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS \"t\" FROM \"orders\""
+      rendered (groups unboundedPreceding currentRow) `shouldEqual`
+        "SELECT SUM(\"total\") OVER (ORDER BY \"placed_at\" ASC GROUPS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS \"t\" FROM \"orders\""
+
+    -- The one-bound form runs from the bound to the current row.
+    it "frames: the one-bound form omits BETWEEN" do
+      let query = select' [as (sum_ (col "total") `over` emptyWindow
+                                  { orderBy = [asc (col "placed_at")]
+                                  , frame = Just (frameFrom Rows unboundedPreceding)
+                                  }) "t"]
+            # from "orders"
+            # formatInline
+      query `shouldEqual`
+        "SELECT SUM(\"total\") OVER (ORDER BY \"placed_at\" ASC ROWS UNBOUNDED PRECEDING) AS \"t\" FROM \"orders\""
+
+    -- OVER binds tighter than any operator, so the window function is an atom
+    -- and the arithmetic around it brackets nothing.
+    it "binds tighter than an operator" do
+      let query = select' [as (binOp "-" (rowNumber `over` emptyWindow) (int 1)) "zero_based"]
+            # from "users"
+            # formatInline
+      query `shouldEqual`
+        "SELECT ROW_NUMBER() OVER () - 1 AS \"zero_based\" FROM \"users\""
+
+    it "a window function is legal in ORDER BY" do
+      let query = select' (cols ["name"])
+            # from "users"
+            # orderBy [asc (rank `over` emptyWindow { orderBy = [desc (col "score")] })]
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"name\" FROM \"users\" ORDER BY RANK() OVER (ORDER BY \"score\" DESC) ASC"
+
+    -- A window sits in the select list, so its parameters are numbered before
+    -- the WHERE clause's.
+    it "numbers a window's parameters in emitted order" do
+      let result = select' [as (countStar `over` emptyWindow
+                                   { partitionBy = [coalesce [col "department", str "unknown"]] })
+                              "headcount"]
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # format
+      result.sql `shouldEqual`
+        "SELECT COUNT(*) OVER (PARTITION BY COALESCE(\"department\", $1)) AS \"headcount\" FROM \"users\" WHERE \"active\" = $2"
+      result.params `shouldEqual` [LitString "unknown", LitBoolean true]

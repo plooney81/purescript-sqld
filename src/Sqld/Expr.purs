@@ -10,7 +10,7 @@ module Sqld.Expr where
 import Prelude (($), (+), (<<<))
 import Data.Maybe (Maybe(..))
 import Data.String as String
-import Sqld.Core (Expr(..), Literal(..), Query)
+import Sqld.Core (Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), Query, Window)
 
 -- ---------------------------------------------------------------------------
 -- Column references
@@ -232,3 +232,91 @@ lower e = App "LOWER" [ e ]
 
 upper :: Expr -> Expr
 upper e = App "UPPER" [ e ]
+
+-- ---------------------------------------------------------------------------
+-- Window functions
+-- ---------------------------------------------------------------------------
+
+-- | Evaluates an aggregate or window function over a window rather than over
+-- | the whole group:
+-- |
+-- |     rowNumber `over` emptyWindow
+-- |       { partitionBy = [ col "department" ]
+-- |       , orderBy     = [ desc (col "age") ]
+-- |       }
+-- |     -- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
+-- |
+-- | `emptyWindow` comes from `Sqld.Core`, alongside `emptyQuery`; build a
+-- | window from it by record update. Every field is optional, and an empty
+-- | window emits `OVER ()`.
+-- |
+-- | PostgreSQL allows a window function in `SELECT` and `ORDER BY` only, and
+-- | rejects one in `WHERE`, `GROUP BY` or `HAVING`. That is not expressed in the
+-- | type — an `Over` is an ordinary `Expr` — so it is the database that reports
+-- | the mistake.
+over :: Expr -> Window -> Expr
+over = Over
+
+-- | `ROW_NUMBER()` — the row's position in its partition, ties broken
+-- | arbitrarily.
+rowNumber :: Expr
+rowNumber = App "ROW_NUMBER" []
+
+-- | `RANK()` — position with gaps after ties.
+rank :: Expr
+rank = App "RANK" []
+
+-- | `DENSE_RANK()` — position without gaps after ties.
+denseRank :: Expr
+denseRank = App "DENSE_RANK" []
+
+-- | `LAG(e, n)` — `e` from the row `n` places back in the partition, or `NULL`
+-- | at the start of one.
+lag :: Expr -> Int -> Expr
+lag e n = App "LAG" [ e, int n ]
+
+-- | `LEAD(e, n)` — the mirror of `lag`, looking forward.
+lead :: Expr -> Int -> Expr
+lead e n = App "LEAD" [ e, int n ]
+
+-- ---------------------------------------------------------------------------
+-- Window frames
+-- ---------------------------------------------------------------------------
+
+-- | `ROWS BETWEEN start AND end` — a frame counted in physical rows.
+rows :: FrameBound -> FrameBound -> Frame
+rows = frameBetween Rows
+
+-- | `RANGE BETWEEN start AND end` — a frame counted in `ORDER BY` values, so
+-- | peers share a frame. An offset bound needs exactly one `ORDER BY` column.
+range :: FrameBound -> FrameBound -> Frame
+range = frameBetween Range
+
+-- | `GROUPS BETWEEN start AND end` — a frame counted in peer groups.
+-- | PostgreSQL requires the window to be ordered.
+groups :: FrameBound -> FrameBound -> Frame
+groups = frameBetween Groups
+
+-- | The general form: any mode, both bounds.
+frameBetween :: FrameMode -> FrameBound -> FrameBound -> Frame
+frameBetween mode start end = { mode, start, end: Just end }
+
+-- | SQL's one-bound form, `ROWS UNBOUNDED PRECEDING`, which runs from `start`
+-- | to the current row.
+frameFrom :: FrameMode -> FrameBound -> Frame
+frameFrom mode start = { mode, start, end: Nothing }
+
+unboundedPreceding :: FrameBound
+unboundedPreceding = UnboundedPreceding
+
+preceding :: Int -> FrameBound
+preceding = Preceding
+
+currentRow :: FrameBound
+currentRow = CurrentRow
+
+following :: Int -> FrameBound
+following = Following
+
+unboundedFollowing :: FrameBound
+unboundedFollowing = UnboundedFollowing
