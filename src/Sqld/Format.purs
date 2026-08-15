@@ -1,13 +1,13 @@
 module Sqld.Format where
 
 import Prelude
-import Data.Array (elem, filter, mapWithIndex, reverse) as Array
-import Data.Foldable (foldl, intercalate)
+import Data.Array (elem, filter, mapWithIndex, null, reverse) as Array
+import Data.Foldable (any, foldl, intercalate)
 import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
+import Sqld.Core (Cte(..), Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -107,21 +107,22 @@ inlineLiteral LitNull        = "NULL"
 -- ---------------------------------------------------------------------------
 
 formatQuery :: Layout -> Query -> WithBindings String
-formatQuery layout q state0 = Tuple sql s7
+formatQuery layout q state0 = Tuple sql s8
   where
-  Tuple selectSql  s1 = formatSelect  layout q.select  state0
-  Tuple fromSql    s2 = formatFrom    layout q.from    s1
-  Tuple joinsSql   s3 = formatJoins   layout q.joins   s2
-  Tuple whereSql   s4 = formatWhere   layout q.where_  s3
-  Tuple groupBySql s5 = formatGroupBy layout q.groupBy s4
-  Tuple havingSql  s6 = formatHaving  layout q.having  s5
-  Tuple orderBySql s7 = formatOrderBy layout q.orderBy s6
+  Tuple withSql    s1 = formatWith    layout q.with    state0
+  Tuple selectSql  s2 = formatSelect  layout q.select  s1
+  Tuple fromSql    s3 = formatFrom    layout q.from    s2
+  Tuple joinsSql   s4 = formatJoins   layout q.joins   s3
+  Tuple whereSql   s5 = formatWhere   layout q.where_  s4
+  Tuple groupBySql s6 = formatGroupBy layout q.groupBy s5
+  Tuple havingSql  s7 = formatHaving  layout q.having  s6
+  Tuple orderBySql s8 = formatOrderBy layout q.orderBy s7
 
   limitSql  = formatLimit  q.limit
   offsetSql = formatOffset q.offset
 
   parts = Array.filter (_ /= mempty)
-    [ selectSql, fromSql, joinsSql, whereSql
+    [ withSql, selectSql, fromSql, joinsSql, whereSql
     , groupBySql, havingSql, orderBySql, limitSql, offsetSql ]
 
   sql = intercalate (clauseSep layout) parts
@@ -129,6 +130,26 @@ formatQuery layout q state0 = Tuple sql s7
 -- ---------------------------------------------------------------------------
 -- Clause formatters
 -- ---------------------------------------------------------------------------
+
+-- | `RECURSIVE` belongs to the clause, not to one CTE, so a single recursive
+-- | entry makes the whole `WITH` recursive.
+formatWith :: Layout -> Array Cte -> WithBindings String
+formatWith _ [] state = Tuple mempty state
+formatWith layout ctes state = Tuple (keyword <> intercalate ("," <> clauseSep layout) parts) s'
+  where
+  keyword = if any (\(Cte c) -> c.recursive) ctes then "WITH RECURSIVE " else "WITH "
+
+  Tuple parts s' = mapAccum (formatCte layout) state ctes
+
+formatCte :: Layout -> Cte -> WithBindings String
+formatCte layout (Cte c) state =
+  Tuple (quoteIdent c.name <> columnList <> " AS " <> parenthesise layout sql) s'
+  where
+  columnList =
+    if Array.null c.columns then mempty
+    else " (" <> intercalate ", " (map quoteIdent c.columns) <> ")"
+
+  Tuple sql s' = formatQuery (nest layout) c.query state
 
 formatSelect :: Layout -> Array SelectExpr -> WithBindings String
 formatSelect layout exprs state = Tuple ("SELECT " <> intercalate ", " parts) s'
