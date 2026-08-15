@@ -31,6 +31,8 @@ Regenerate with `make examples`.
 - [Scalar subqueries](#scalar-subqueries)
 - [Derived tables](#derived-tables)
 - [Joining a derived table](#joining-a-derived-table)
+- [Common table expressions](#common-table-expressions)
+- [Recursive CTEs](#recursive-ctes)
 - [Pagination](#pagination)
 - [Composing fragments](#composing-fragments)
 - [Merging independent queries](#merging-independent-queries)
@@ -495,6 +497,94 @@ JOIN (
 ```
 
 <sub>Parameterised: <code>SELECT "u"."name", "totals"."order_count" FROM "users" AS "u" JOIN (SELECT "user_id", COUNT(*) AS "order_count" FROM "orders" GROUP BY "user_id") AS "totals" ON ("u"."id" = "totals"."user_id")</code></sub>
+
+---
+
+## Common table expressions
+
+`with_` names an intermediate result set. A later CTE may reference an
+earlier one, and the outer query treats each as an ordinary relation — so a
+reporting query reads as a sequence of named steps rather than a pile of
+nested subqueries. Parameters inside a CTE are numbered before the outer
+query's, matching where they appear in the emitted SQL.
+
+```purescript
+commonTableExpressions :: Query
+commonTableExpressions =
+  select' (cols [ "u.name", "spend.total" ])
+    # with_ "paid"
+        ( select' (cols [ "user_id", "total" ])
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+        )
+    # with_ "spend"
+        ( select' (cols [ "user_id" ] <> [ as (sum_ (col "total")) "total" ])
+            # from "paid"
+            # groupBy [ col "user_id" ]
+        )
+    # fromAs "users" "u"
+    # innerJoin "spend" (col "u.id" .== col "spend.user_id")
+    # where_ (col "spend.total" .> num 500.0)
+```
+
+```sql
+WITH "paid" AS (
+  SELECT "user_id", "total"
+  FROM "orders"
+  WHERE "status" = 'paid'
+),
+"spend" AS (
+  SELECT "user_id", SUM("total") AS "total"
+  FROM "paid"
+  GROUP BY "user_id"
+)
+SELECT "u"."name", "spend"."total"
+FROM "users" AS "u"
+JOIN "spend" ON ("u"."id" = "spend"."user_id")
+WHERE "spend"."total" > 500.0
+```
+
+Bound parameters: `$1` = `"paid"`, `$2` = `500`
+
+<sub>Parameterised: <code>WITH "paid" AS (SELECT "user_id", "total" FROM "orders" WHERE "status" = $1), "spend" AS (SELECT "user_id", SUM("total") AS "total" FROM "paid" GROUP BY "user_id") SELECT "u"."name", "spend"."total" FROM "users" AS "u" JOIN "spend" ON ("u"."id" = "spend"."user_id") WHERE "spend"."total" > $2</code></sub>
+
+---
+
+## Recursive CTEs
+
+`withRecursive` lets a CTE refer to itself. `RECURSIVE` belongs to the whole
+`WITH` clause in SQL, so one recursive entry is enough — the other CTEs need
+no change. `withCte` is the general form, and `cteColumns` names the output
+columns, which a recursive CTE usually wants.
+
+The two halves of a recursive CTE are joined by `UNION ALL`, and set
+operations are not in the AST yet — until they are, that half comes from
+`raw`.
+
+```purescript
+recursiveCte :: Query
+recursiveCte =
+  select' [ star ]
+    # withCte
+        ( cte "counting" countUp
+            # cteColumns [ "n" ]
+            # cteRecursive
+        )
+    # from "counting"
+
+countUp :: Query
+countUp = select' [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 10") ]
+```
+
+```sql
+WITH RECURSIVE "counting" ("n") AS (
+  SELECT 1 UNION ALL SELECT "n" + 1 FROM "counting" WHERE "n" < 10
+)
+SELECT *
+FROM "counting"
+```
+
+<sub>Parameterised: <code>WITH RECURSIVE "counting" ("n") AS (SELECT 1 UNION ALL SELECT "n" + 1 FROM "counting" WHERE "n" < 10) SELECT * FROM "counting"</code></sub>
 
 ---
 

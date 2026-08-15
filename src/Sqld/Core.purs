@@ -86,8 +86,30 @@ data OrderDir = Asc | Desc
 
 type OrderExpr = { expr :: Expr, dir :: OrderDir }
 
+-- | One entry in a `WITH` clause: a named intermediate result set.
+-- |
+-- | A `newtype` around the record rather than a bare record synonym, because a
+-- | CTE holds a `Query` and a `Query` holds CTEs — a synonym would be a
+-- | recursive type synonym, which PureScript rejects. `Relation` breaks the
+-- | same cycle the same way.
+-- |
+-- | `columns` is the optional output column list, `WITH "t" ("a", "b") AS (…)`;
+-- | empty omits it.
+-- |
+-- | `recursive` is recorded per entry even though SQL puts `RECURSIVE` on the
+-- | whole `WITH` clause. That keeps the builder local — `withRecursive` marks
+-- | the one CTE it adds — and `Sqld.Format` folds the flags when it emits the
+-- | keyword.
+newtype Cte = Cte
+  { name      :: String
+  , columns   :: Array String
+  , recursive :: Boolean
+  , query     :: Query
+  }
+
 type Query =
-  { select  :: Array SelectExpr
+  { with    :: Array Cte
+  , select  :: Array SelectExpr
   , from    :: Maybe Relation
   , joins   :: Array Join
   , where_  :: Maybe Expr
@@ -100,7 +122,8 @@ type Query =
 
 emptyQuery :: Query
 emptyQuery =
-  { select:  []
+  { with:    []
+  , select:  []
   , from:    Nothing
   , joins:   []
   , where_:  Nothing

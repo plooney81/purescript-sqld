@@ -242,6 +242,81 @@ selectSpec = describe "Sqld.Select" do
         "SELECT \"recent\".* FROM (SELECT * FROM \"orders\" WHERE \"status\" = $1) AS \"recent\" WHERE \"recent\".\"total\" > $2"
       result.params `shouldEqual` [LitString "paid", LitInt 100]
 
+  describe "common table expressions" do
+    it "names an intermediate result set" do
+      let recent = emptyQuery
+            # select [star]
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+          query = emptyQuery
+            # select [starFrom "recent"]
+            # with_ "recent" recent
+            # from "recent"
+            # formatInline
+      query `shouldEqual`
+        "WITH \"recent\" AS (SELECT * FROM \"orders\" WHERE \"status\" = 'paid') SELECT \"recent\".* FROM \"recent\""
+
+    it "comma-separates multiple CTEs within one WITH" do
+      let query = emptyQuery
+            # select [star]
+            # with_ "a" (emptyQuery # select [expr (raw "1")])
+            # with_ "b" (emptyQuery # select [expr (raw "2")])
+            # from "b"
+            # formatInline
+      query `shouldEqual`
+        "WITH \"a\" AS (SELECT 1), \"b\" AS (SELECT 2) SELECT * FROM \"b\""
+
+    it "names the output columns" do
+      let query = emptyQuery
+            # select [star]
+            # withCte (cteColumns ["n"] (cte "t" (emptyQuery # select [expr (raw "1")])))
+            # from "t"
+            # formatInline
+      query `shouldEqual` "WITH \"t\" (\"n\") AS (SELECT 1) SELECT * FROM \"t\""
+
+    it "quotes CTE names as identifiers" do
+      let query = emptyQuery
+            # select [star]
+            # with_ "odd name" (emptyQuery # select [expr (raw "1")])
+            # from "odd name"
+            # formatInline
+      query `shouldEqual` "WITH \"odd name\" AS (SELECT 1) SELECT * FROM \"odd name\""
+
+    -- RECURSIVE is a property of the whole clause, so one recursive entry
+    -- moves the keyword onto a WITH that also carries plain CTEs.
+    it "one recursive CTE makes the whole clause recursive" do
+      let query = emptyQuery
+            # select [star]
+            # with_ "a" (emptyQuery # select [expr (raw "1")])
+            # withRecursive "b" (emptyQuery # select [expr (raw "2")])
+            # from "b"
+            # formatInline
+      query `shouldEqual`
+        "WITH RECURSIVE \"a\" AS (SELECT 1), \"b\" AS (SELECT 2) SELECT * FROM \"b\""
+
+    -- A CTE precedes every other clause in the emitted SQL, so its parameters
+    -- are numbered first.
+    it "parameters are numbered before the outer query's" do
+      let recent = emptyQuery
+            # select [star]
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+          result = emptyQuery
+            # select [starFrom "recent"]
+            # with_ "recent" recent
+            # from "recent"
+            # where_ (tcol "recent" "total" .> int 100)
+            # format
+      result.sql `shouldEqual`
+        "WITH \"recent\" AS (SELECT * FROM \"orders\" WHERE \"status\" = $1) SELECT \"recent\".* FROM \"recent\" WHERE \"recent\".\"total\" > $2"
+      result.params `shouldEqual` [LitString "paid", LitInt 100]
+
+    it "mergeQueries concatenates CTEs" do
+      let base     = emptyQuery # select [star] # with_ "a" (emptyQuery # select [expr (raw "1")])
+          override = emptyQuery # with_ "b" (emptyQuery # select [expr (raw "2")]) # from "b"
+          query    = mergeQueries base override # formatInline
+      query `shouldEqual` "WITH \"a\" AS (SELECT 1), \"b\" AS (SELECT 2) SELECT * FROM \"b\""
+
   describe "GROUP BY / HAVING" do
     it "GROUP BY with HAVING and aggregation" do
       let query = emptyQuery

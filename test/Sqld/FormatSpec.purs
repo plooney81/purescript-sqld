@@ -5,7 +5,7 @@ import Data.String (trim)
 import Sqld.Core (emptyQuery)
 import Sqld.Expr (and, bool, col, countStar, exists, inSub, int, null, raw, str, sub, tcol, (.==))
 import Sqld.Format (formatInline, formatPretty)
-import Sqld.Select (as, cols, expr, from, fromAs, fromSub, leftJoin, select, star, starFrom, where_)
+import Sqld.Select (as, cols, expr, from, fromAs, fromSub, leftJoin, select, star, starFrom, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -174,6 +174,57 @@ FROM (
     WHERE "active" = TRUE
   )
 ) AS "t"
+"""
+
+    it "CTE body gets an indented block of its own" do
+      let query = emptyQuery
+            # select [starFrom "paid"]
+            # with_ "paid"
+                ( emptyQuery
+                    # select (cols ["id", "total"])
+                    # from "orders"
+                    # where_ (col "status" .== str "paid")
+                )
+            # from "paid"
+            # formatPretty
+      query `shouldEqual` trim """
+WITH "paid" AS (
+  SELECT "id", "total"
+  FROM "orders"
+  WHERE "status" = 'paid'
+)
+SELECT "paid".*
+FROM "paid"
+"""
+
+    it "one CTE per line" do
+      let query = emptyQuery
+            # select [star]
+            # with_ "paid"
+                ( emptyQuery
+                    # select (cols ["user_id"])
+                    # from "orders"
+                    # where_ (col "status" .== str "paid")
+                )
+            # with_ "recent"
+                ( emptyQuery
+                    # select (cols ["user_id"])
+                    # from "orders"
+                )
+            # from "paid"
+            # formatPretty
+      query `shouldEqual` trim """
+WITH "paid" AS (
+  SELECT "user_id"
+  FROM "orders"
+  WHERE "status" = 'paid'
+),
+"recent" AS (
+  SELECT "user_id"
+  FROM "orders"
+)
+SELECT *
+FROM "paid"
 """
 
     it "leaves formatInline on one line" do

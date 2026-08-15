@@ -57,8 +57,8 @@ await pool.query(query.sql, query.params);
 ## Examples
 
 **[EXAMPLES.md](EXAMPLES.md)** is a worked cookbook — filtering, joins,
-aggregation, subqueries, derived tables, composing fragments from optional
-parameters, and when to reach for `raw`.
+aggregation, subqueries, derived tables, common table expressions, composing
+fragments from optional parameters, and when to reach for `raw`.
 
 It is generated from [`src/Example/Cookbook.purs`](src/Example/Cookbook.purs),
 and every example is replayed against a live PostgreSQL server by the
@@ -69,7 +69,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `emptyQuery` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Cte`, `emptyQuery` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
@@ -88,6 +88,9 @@ Start with `emptyQuery` and pipe through helpers from `Sqld.Select`:
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
 | `fromSub :: Query -> String -> Query -> Query` | FROM a derived table (subquery + alias) |
 | `where_ :: Expr -> Query -> Query` | Add WHERE condition (ANDs with any existing) |
+| `with_ :: String -> Query -> Query -> Query` | Add a named CTE (`WITH "name" AS (…)`) |
+| `withRecursive :: String -> Query -> Query -> Query` | Add a CTE that may refer to itself |
+| `withCte :: Cte -> Query -> Query` | General form; use it to name a CTE's output columns |
 | `innerJoin` / `leftJoin` / `rightJoin` / `fullJoin` | `:: String -> Expr -> Query -> Query` |
 | `innerJoinAs` / `leftJoinAs` / `rightJoinAs` / `fullJoinAs` | `:: String -> String -> Expr -> Query -> Query` |
 | `joinOn :: JoinType -> Relation -> Expr -> Query -> Query` | General form; use it to join a derived table |
@@ -213,6 +216,42 @@ emptyQuery
   # fromAs "users" "u"
   # joinOn InnerJoin (derived totals "t") (col "u.id" .== col "t.user_id")
 ```
+
+### Common table expressions
+
+`with_` names an intermediate result set. A later CTE may reference an earlier
+one, and the outer query treats each as an ordinary relation:
+
+```purescript
+emptyQuery
+  # select [starFrom "recent"]
+  # with_ "recent" (emptyQuery # select [star] # from "orders" # where_ (col "status" .== str "paid"))
+  # from "recent"
+  # where_ (col "recent.total" .> int 100)
+-- WITH "recent" AS (SELECT * FROM "orders" WHERE "status" = $1)
+--   SELECT "recent".* FROM "recent" WHERE "recent"."total" > $2
+```
+
+A `WITH` clause precedes every other clause in the emitted SQL, so a CTE's
+parameters are numbered before the outer query's.
+
+`withRecursive` lets a CTE refer to itself. `RECURSIVE` is a property of the
+whole clause in SQL rather than of one CTE, so a single recursive entry makes
+the clause recursive and the others need no change. Use `withCte` with
+`cteColumns` to name a CTE's output columns:
+
+```purescript
+emptyQuery
+  # select [star]
+  # withCte (cte "counting" body # cteColumns ["n"] # cteRecursive)
+  # from "counting"
+-- WITH RECURSIVE "counting" ("n") AS (…) SELECT * FROM "counting"
+```
+
+The two halves of a recursive CTE are joined by `UNION ALL`. Set operations are
+not in the AST yet, so until they are the recursive term comes from `raw` — see
+[Recursive CTEs](EXAMPLES.md#recursive-ctes) for a worked example.
+`MATERIALIZED` / `NOT MATERIALIZED` hints are not supported.
 
 ### Operator precedence
 

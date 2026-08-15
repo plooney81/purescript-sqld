@@ -23,8 +23,8 @@ import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, emptyQuery)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, num, or, raw, str, sub, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, where_)
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, num, or, raw, str, sub, sum_, (.<), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -249,6 +249,53 @@ derivedTableJoin =
         )
         (col "u.id" .== col "totals.user_id")
 
+-- #example common-table-expressions
+-- # Common table expressions
+-- `with_` names an intermediate result set. A later CTE may reference an
+-- earlier one, and the outer query treats each as an ordinary relation — so a
+-- reporting query reads as a sequence of named steps rather than a pile of
+-- nested subqueries. Parameters inside a CTE are numbered before the outer
+-- query's, matching where they appear in the emitted SQL.
+commonTableExpressions :: Query
+commonTableExpressions =
+  select' (cols [ "u.name", "spend.total" ])
+    # with_ "paid"
+        ( select' (cols [ "user_id", "total" ])
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+        )
+    # with_ "spend"
+        ( select' (cols [ "user_id" ] <> [ as (sum_ (col "total")) "total" ])
+            # from "paid"
+            # groupBy [ col "user_id" ]
+        )
+    # fromAs "users" "u"
+    # innerJoin "spend" (col "u.id" .== col "spend.user_id")
+    # where_ (col "spend.total" .> num 500.0)
+
+-- #example recursive-cte
+-- # Recursive CTEs
+-- `withRecursive` lets a CTE refer to itself. `RECURSIVE` belongs to the whole
+-- `WITH` clause in SQL, so one recursive entry is enough — the other CTEs need
+-- no change. `withCte` is the general form, and `cteColumns` names the output
+-- columns, which a recursive CTE usually wants.
+--
+-- The two halves of a recursive CTE are joined by `UNION ALL`, and set
+-- operations are not in the AST yet — until they are, that half comes from
+-- `raw`.
+recursiveCte :: Query
+recursiveCte =
+  select' [ star ]
+    # withCte
+        ( cte "counting" countUp
+            # cteColumns [ "n" ]
+            # cteRecursive
+        )
+    # from "counting"
+
+countUp :: Query
+countUp = select' [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 10") ]
+
 -- #example pagination
 -- # Pagination
 -- Builders are plain `Query -> Query` functions, so a pagination helper is
@@ -336,6 +383,8 @@ cookbook =
   , { name: "scalar-subquery",      query: scalarSubquery }
   , { name: "derived-table",        query: derivedTable }
   , { name: "derived-table-join",   query: derivedTableJoin }
+  , { name: "common-table-expressions", query: commonTableExpressions }
+  , { name: "recursive-cte",        query: recursiveCte }
   , { name: "pagination",           query: pagination }
   , { name: "composing-fragments",  query: composingFragments }
   , { name: "merging-queries",      query: mergingQueries }

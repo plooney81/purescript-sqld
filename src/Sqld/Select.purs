@@ -3,7 +3,7 @@ module Sqld.Select where
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<), (<>), map)
-import Sqld.Core (Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
+import Sqld.Core (Cte(..), Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
 import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -63,6 +63,41 @@ where_ e q = q { where_ = Just $ case q.where_ of
 
 setWhere :: Expr -> Query -> Query
 setWhere e q = q { where_ = Just e }
+
+-- ---------------------------------------------------------------------------
+-- Common table expressions
+-- ---------------------------------------------------------------------------
+
+-- | A named intermediate result set. Refer to it from the outer query the way
+-- | you would any other relation:
+-- |
+-- |     select' [ starFrom "recent" ]
+-- |       # with_ "recent" (select' [ star ] # from "orders")
+-- |       # from "recent"
+with_ :: String -> Query -> Query -> Query
+with_ name body = withCte $ cte name body
+
+-- | As `with_`, but the CTE may refer to itself. `RECURSIVE` is a property of
+-- | the whole `WITH` clause in SQL, so one recursive CTE makes the clause
+-- | recursive — the other entries need not change.
+withRecursive :: String -> Query -> Query -> Query
+withRecursive name body = withCte $ cteRecursive $ cte name body
+
+-- | The general form. Reach for this to name a CTE's output columns, or to
+-- | build one in stages. CTEs append in call order, and a later one may
+-- | reference an earlier one.
+withCte :: Cte -> Query -> Query
+withCte c q = q { with = q.with <> [ c ] }
+
+cte :: String -> Query -> Cte
+cte name query = Cte { name, columns: [], recursive: false, query }
+
+-- | The optional output column list: `WITH "t" ("a", "b") AS (…)`.
+cteColumns :: Array String -> Cte -> Cte
+cteColumns columns (Cte c) = Cte (c { columns = columns })
+
+cteRecursive :: Cte -> Cte
+cteRecursive (Cte c) = Cte (c { recursive = true })
 
 -- ---------------------------------------------------------------------------
 -- Joins
@@ -173,7 +208,8 @@ desc e = { expr: e, dir: Desc }
 
 mergeQueries :: Query -> Query -> Query
 mergeQueries base override =
-  { select:  if Array.null override.select  then base.select  else override.select
+  { with:    base.with <> override.with
+  , select:  if Array.null override.select  then base.select  else override.select
   , from:    case override.from of
                Nothing -> base.from
                Just _  -> override.from

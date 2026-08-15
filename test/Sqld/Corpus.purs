@@ -26,9 +26,9 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, derived, desc, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, tcols, where_)
+import Sqld.Core (Cte(..), Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, sum_, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select, star, starFrom, tcolAs, tcols, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -524,6 +524,111 @@ handWritten =
         # where_ (tcol "recent" "total" .> int 100)
     }
 
+  -- Common table expressions --------------------------------------------------
+
+  , { name: "with-cte"
+    , query: emptyQuery
+        # select [ starFrom "recent" ]
+        # with_ "recent"
+            ( emptyQuery
+                # select [ star ]
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+        # from "recent"
+    }
+
+  -- A later CTE may reference an earlier one, and the outer query treats both
+  -- as ordinary relations.
+  , { name: "with-cte-multiple"
+    , query: emptyQuery
+        # select [ expr (tcol "u" "name"), expr (tcol "spend" "total") ]
+        # with_ "paid"
+            ( emptyQuery
+                # select (cols [ "user_id", "total" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+        # with_ "spend"
+            ( emptyQuery
+                # select (cols [ "user_id" ] <> [ as (sum_ (col "total")) "total" ])
+                # from "paid"
+                # groupBy [ col "user_id" ]
+            )
+        # fromAs "users" "u"
+        # innerJoin "spend" (tcol "u" "id" .== tcol "spend" "user_id")
+    }
+
+  , { name: "with-cte-column-list"
+    , query: emptyQuery
+        # select [ star ]
+        # withCte
+            ( cteColumns [ "user_id", "spend" ]
+                ( cte "totals"
+                    ( emptyQuery
+                        # select (exprs [ col "user_id", sum_ (col "total") ])
+                        # from "orders"
+                        # groupBy [ col "user_id" ]
+                    )
+                )
+            )
+        # from "totals"
+    }
+
+  -- A CTE's parameters sit ahead of every other clause in the emitted SQL, so
+  -- they are numbered first.
+  , { name: "with-cte-parameter-ordering"
+    , query: emptyQuery
+        # select [ starFrom "recent" ]
+        # with_ "recent"
+            ( emptyQuery
+                # select (cols [ "id", "user_id", "total" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+        # from "recent"
+        # where_ (tcol "recent" "total" .> int 100)
+    }
+
+  -- A recursive CTE is conventionally `anchor UNION ALL recursive-term`, and
+  -- set operations are not in the AST yet (#8) — hence `raw` for the union.
+  -- The entry earns its place regardless: it proves PostgreSQL accepts what
+  -- the WITH clause itself emits for a genuinely self-referencing CTE.
+  , { name: "with-recursive"
+    , query: emptyQuery
+        # select [ star ]
+        # withRecursive "counting"
+            ( emptyQuery
+                # select [ expr (raw "1 AS \"n\" UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
+            )
+        # from "counting"
+    }
+
+  -- RECURSIVE is a property of the clause, not the entry: one recursive CTE
+  -- makes the whole WITH recursive, and the non-recursive one still works.
+  , { name: "with-recursive-mixed"
+    , query: emptyQuery
+        # select [ star ]
+        # with_ "paid"
+            ( emptyQuery
+                # select (cols [ "user_id" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+        # withCte
+            ( cteRecursive
+                ( cteColumns [ "n" ]
+                    ( cte "counting"
+                        ( emptyQuery
+                            # select [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
+                        )
+                    )
+                )
+            )
+        # from "counting"
+        # innerJoin "paid" (tcol "paid" "user_id" .== tcol "counting" "n")
+    }
+
   -- Subquery parameters must keep numbering in step with the outer query.
   , { name: "sub-parameter-ordering"
     , query: emptyQuery
@@ -616,9 +721,17 @@ relationTags prefix (Table _ alias) = case alias of
   Just _ -> [ prefix, prefix <> ".alias" ]
 relationTags prefix (Derived q _) = (prefix <> ".derived") : queryTags q
 
+cteTags :: Cte -> Array String
+cteTags (Cte c) =
+  [ "Query.with" ]
+    <> (if c.recursive then [ "Query.with.recursive" ] else [])
+    <> (if Array.null c.columns then [] else [ "Query.with.columns" ])
+    <> queryTags c.query
+
 queryTags :: Query -> Array String
 queryTags q =
-  Array.concatMap selectTags q.select
+  Array.concatMap cteTags q.with
+    <> Array.concatMap selectTags q.select
     <> foldClause "Query.from" (map (relationTags "Query.from") q.from)
     <> Array.concatMap (\j -> joinTypeTag j.type_ : relationTags "Query.join" j.relation <> exprTags j.on) q.joins
     <> foldClause "Query.where" (map exprTags q.where_)
@@ -694,6 +807,9 @@ requiredTags = Array.sort
   , "JoinType.FullJoin"
   , "OrderDir.Asc"
   , "OrderDir.Desc"
+  , "Query.with"
+  , "Query.with.columns"
+  , "Query.with.recursive"
   , "Query.from"
   , "Query.from.alias"
   , "Query.join"
