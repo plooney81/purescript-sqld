@@ -154,7 +154,9 @@ From `Sqld.Expr`:
 | `not :: Expr -> Expr` | `not e` | `NOT e` |
 | `isNull / isNotNull` | `isNull (col "deleted_at")` | `"deleted_at" IS NULL` |
 | `in_ :: Expr -> Array Expr -> Expr` | `in_ (col "id") [int 1, int 2]` | `"id" IN ($1, $2)` |
+| `in_` with an empty list | `in_ (col "id") []` | `FALSE` |
 | `notIn` | `notIn (col "s") [str "x"]` | `"s" NOT IN ($1)` |
+| `notIn` with an empty list | `notIn (col "s") []` | `TRUE` |
 | `between` | `between (col "n") (int 1) (int 10)` | `"n" BETWEEN $1 AND $2` |
 | `like / ilike` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
 | `notLike / notILike` | `notLike (col "email") "%@spam.com"` | `"email" NOT LIKE $1` |

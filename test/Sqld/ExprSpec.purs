@@ -154,6 +154,55 @@ exprSpec = describe "Sqld.Expr" do
             # formatInline
       query `shouldEqual` "SELECT * FROM \"t\" WHERE \"status\" NOT IN ('deleted', 'banned')"
 
+    -- "id" IN () is a syntax error, so an empty list folds to the constant it
+    -- means: nothing is a member of the empty set.
+    it "IN with an empty list produces FALSE" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_ ((col "id") `in_` [])
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE FALSE"
+
+    it "NOT IN with an empty list produces TRUE" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_ ((col "id") `notIn` [])
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE TRUE"
+
+    -- The folded constant sits under AND, OR and NOT in turn: each is a
+    -- position where a badly bracketed operand would change the meaning.
+    it "the folded constant is bracket-safe as an operand" do
+      let query = emptyQuery
+            # select [star]
+            # from "t"
+            # where_
+                (and [ col "active" .== bool true
+                     , or [ (col "id") `in_` [], (col "flag") `notIn` [] ]
+                     , not ((col "id") `in_` [])
+                     ])
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"t\" WHERE (\"active\" = TRUE AND (FALSE OR TRUE) AND NOT FALSE)"
+
+    -- Folding must not consume a parameter slot, or every binding after it
+    -- shifts by one.
+    it "folding leaves parameter numbering untouched" do
+      let result = emptyQuery
+            # select [star]
+            # from "t"
+            # where_
+                (and [ col "a" .== int 1
+                     , (col "id") `in_` []
+                     , col "b" .== int 2
+                     ])
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"t\" WHERE (\"a\" = $1 AND FALSE AND \"b\" = $2)"
+      result.params `shouldEqual` [LitInt 1, LitInt 2]
+
     it "BETWEEN" do
       let query = emptyQuery
             # select [star]
