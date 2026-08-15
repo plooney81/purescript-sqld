@@ -67,7 +67,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Cte`, `emptyQuery` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Cte`, `SetOperation`, `emptyQuery` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
@@ -94,6 +94,10 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `innerJoin` / `leftJoin` / `rightJoin` / `fullJoin` | `:: String -> Expr -> Query -> Query` |
 | `innerJoinAs` / `leftJoinAs` / `rightJoinAs` / `fullJoinAs` | `:: String -> String -> Expr -> Query -> Query` |
 | `joinOn :: JoinType -> Relation -> Expr -> Query -> Query` | General form; use it to join a derived table |
+| `union` / `unionAll` | `:: Query -> Query -> Query` — the rows of both, duplicates removed / kept |
+| `intersect` / `intersectAll` | `:: Query -> Query -> Query` — the rows in both |
+| `except` / `exceptAll` | `:: Query -> Query -> Query` — the left query's rows, minus the right's |
+| `combine :: SetOp -> Boolean -> Query -> Query -> Query` | General form; any set operator, with or without `ALL` |
 | `groupBy :: Array Expr -> Query -> Query` | GROUP BY |
 | `having :: Expr -> Query -> Query` | HAVING |
 | `orderBy :: Array OrderExpr -> Query -> Query` | ORDER BY |
@@ -214,6 +218,39 @@ select' [star]
   # joinOn InnerJoin (derived totals "t") (col "u.id" .== col "t.user_id")
 ```
 
+### Set operations
+
+The query you pipe from is the left operand, so a chain reads in the order it
+is emitted:
+
+```purescript
+select' (cols ["id"]) # from "users"
+  # union (select' (cols ["user_id"]) # from "orders")
+-- (SELECT "id" FROM "users") UNION (SELECT "user_id" FROM "orders")
+```
+
+Both operands are bracketed. That makes a chain of mixed operators mean what it
+reads like, whatever PostgreSQL's own precedence between `UNION` and
+`INTERSECT` happens to be, and it leaves each operand its own `ORDER BY` and
+`LIMIT`:
+
+```purescript
+select' (cols ["id"]) # from "users" # orderBy [asc (col "id")] # limit 5
+  # unionAll (select' (cols ["user_id"]) # from "orders" # limit 3)
+-- (SELECT "id" FROM "users" ORDER BY "id" ASC LIMIT 5)
+--   UNION ALL (SELECT "user_id" FROM "orders" LIMIT 3)
+```
+
+An `orderBy`, `limit` or `offset` applied *after* the operation falls outside
+the brackets, so it applies to the combined result — as it does in SQL. So does
+a `with_`, whose parameters are numbered ahead of both operands'; parameters
+within the operands are numbered left to right.
+
+A set operation is a query like any other, so it nests wherever one can:
+`fromSub`, `sub`, `inSub` and a CTE body all take one. `combine` is the general
+form, and the only builders that add to a set operation are `with_`, `orderBy`,
+`limit` and `offset` — the result carries no select list or `FROM` of its own.
+
 ### Common table expressions
 
 `with_` names an intermediate result set. A later CTE may reference an earlier
@@ -243,8 +280,8 @@ select' [star]
 -- WITH RECURSIVE "counting" ("n") AS (…) SELECT * FROM "counting"
 ```
 
-The two halves of a recursive CTE are joined by `UNION ALL`. Set operations are
-not in the AST yet, so until they are the recursive term comes from `raw` — see
+The two halves of a recursive CTE are joined by `unionAll` — an anchor term,
+then a recursive term that reads from the CTE being defined; see
 [Recursive CTEs](EXAMPLES.md#recursive-ctes) for a worked example.
 `MATERIALIZED` / `NOT MATERIALIZED` hints are not supported.
 

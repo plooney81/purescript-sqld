@@ -26,9 +26,9 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..))
+import Sqld.Core (Cte(..), Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..))
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, sum_, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -535,14 +535,18 @@ handWritten =
         # where_ (tcol "recent" "total" .> int 100)
     }
 
-  -- A recursive CTE is conventionally `anchor UNION ALL recursive-term`, and
-  -- set operations are not in the AST yet (#8) — hence `raw` for the union.
-  -- The entry earns its place regardless: it proves PostgreSQL accepts what
-  -- the WITH clause itself emits for a genuinely self-referencing CTE.
+  -- A recursive CTE is conventionally `anchor UNION ALL recursive-term`. The
+  -- anchor's literal is `raw` rather than `int`: a bare parameter in a select
+  -- list gives PostgreSQL nothing to infer a type from, and PREPARE rejects it.
   , { name: "with-recursive"
     , query: select' [ star ]
         # withRecursive "counting"
-            ( select' [ expr (raw "1 AS \"n\" UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
+            ( select' [ as (raw "1") "n" ]
+                # unionAll
+                    ( select' [ expr (binOp "+" (col "n") (int 1)) ]
+                        # from "counting"
+                        # where_ (col "n" .< int 5)
+                    )
             )
         # from "counting"
     }
@@ -560,13 +564,132 @@ handWritten =
             ( cteRecursive
                 ( cteColumns [ "n" ]
                     ( cte "counting"
-                        ( select' [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5") ]
+                        ( select' [ expr (raw "1") ]
+                            # unionAll
+                                ( select' [ expr (binOp "+" (col "n") (int 1)) ]
+                                    # from "counting"
+                                    # where_ (col "n" .< int 5)
+                                )
                         )
                     )
                 )
             )
         # from "counting"
         # innerJoin "paid" (tcol "paid" "user_id" .== tcol "counting" "n")
+    }
+
+  -- Set operations -------------------------------------------------------------
+
+  , { name: "set-op-union"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # union (select' (cols [ "user_id" ]) # from "orders")
+    }
+
+  , { name: "set-op-union-all"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # unionAll (select' (cols [ "user_id" ]) # from "orders")
+    }
+
+  , { name: "set-op-intersect"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # intersect (select' (cols [ "user_id" ]) # from "orders")
+    }
+
+  , { name: "set-op-intersect-all"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # intersectAll (select' (cols [ "user_id" ]) # from "profiles")
+    }
+
+  , { name: "set-op-except"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # except (select' (cols [ "user_id" ]) # from "orders")
+    }
+
+  , { name: "set-op-except-all"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # exceptAll (select' (cols [ "user_id" ]) # from "profiles")
+    }
+
+  -- Both operands are bracketed, so a chain of mixed operators does not depend
+  -- on PostgreSQL's precedence between UNION and INTERSECT.
+  , { name: "set-op-chained"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # union (select' (cols [ "user_id" ]) # from "orders")
+        # except (select' (cols [ "user_id" ]) # from "profiles")
+    }
+
+  -- ORDER BY, LIMIT and OFFSET after a set operation apply to the combined
+  -- result: they are emitted outside the brackets.
+  , { name: "set-op-order-by-limit"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # union (select' (cols [ "user_id" ]) # from "orders")
+        # orderBy [ asc (col "id") ]
+        # limit 10
+        # offset 5
+    }
+
+  -- And an operand keeps an ORDER BY and LIMIT of its own, because it is
+  -- bracketed.
+  , { name: "set-op-operand-order-by-limit"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # orderBy [ asc (col "id") ]
+        # limit 5
+        # unionAll
+            ( select' (cols [ "user_id" ])
+                # from "orders"
+                # orderBy [ desc (col "user_id") ]
+                # limit 3
+            )
+    }
+
+  -- Parameters are numbered left to right across both operands.
+  , { name: "set-op-parameter-ordering"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # where_ (col "active" .== bool true)
+        # union
+            ( select' (cols [ "user_id" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+        # orderBy [ asc (col "id") ]
+    }
+
+  -- A WITH clause on a set operation covers the whole statement, and its
+  -- parameters precede both operands'.
+  , { name: "set-op-with-cte"
+    , query: select' (cols [ "user_id" ])
+        # from "paid"
+        # union
+            ( select' (cols [ "user_id" ])
+                # from "orders"
+                # where_ (col "status" .== str "cancelled")
+            )
+        # with_ "paid"
+            ( select' (cols [ "user_id" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+    }
+
+  -- A set operation is a query like any other, so it nests wherever one can.
+  , { name: "set-op-derived-table"
+    , query: select' [ as countStar "n" ]
+        # fromSub
+            ( select' (cols [ "id" ])
+                # from "users"
+                # union (select' (cols [ "user_id" ]) # from "orders")
+            )
+            "ids"
     }
 
   -- Subquery parameters must keep numbering in step with the outer query.
@@ -659,6 +782,22 @@ relationTags prefix (Table _ alias) = case alias of
   Just _ -> [ prefix, prefix <> ".alias" ]
 relationTags prefix (Derived q _) = (prefix <> ".derived") : queryTags q
 
+setOpTag :: SetOp -> String
+setOpTag = case _ of
+  Union -> "SetOp.Union"
+  Intersect -> "SetOp.Intersect"
+  Except -> "SetOp.Except"
+
+-- | `ALL` is tagged separately from the operator, so the ratchet holds each
+-- | spelling to a corpus entry of its own.
+setOperationTags :: SetOperation -> Array String
+setOperationTags (SetOperation so) =
+  (tag : (if so.all then [ tag <> ".all" ] else []))
+    <> queryTags so.left
+    <> queryTags so.right
+  where
+  tag = setOpTag so.op
+
 cteTags :: Cte -> Array String
 cteTags (Cte c) =
   [ "Query.with" ]
@@ -669,6 +808,7 @@ cteTags (Cte c) =
 queryTags :: Query -> Array String
 queryTags q =
   Array.concatMap cteTags q.with
+    <> foldClause "Query.setOp" (map setOperationTags q.setOp)
     <> Array.concatMap selectTags q.select
     <> foldClause "Query.from" (map (relationTags "Query.from") q.from)
     <> Array.concatMap (\j -> joinTypeTag j.type_ : relationTags "Query.join" j.relation <> exprTags j.on) q.joins
@@ -748,6 +888,13 @@ requiredTags = Array.sort
   , "Query.with"
   , "Query.with.columns"
   , "Query.with.recursive"
+  , "Query.setOp"
+  , "SetOp.Union"
+  , "SetOp.Union.all"
+  , "SetOp.Intersect"
+  , "SetOp.Intersect.all"
+  , "SetOp.Except"
+  , "SetOp.Except.all"
   , "Query.from"
   , "Query.from.alias"
   , "Query.join"

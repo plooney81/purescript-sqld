@@ -285,6 +285,126 @@ selectSpec = describe "Sqld.Select" do
           query    = mergeQueries base override # formatInline
       query `shouldEqual` "WITH \"a\" AS (SELECT 1), \"b\" AS (SELECT 2) SELECT * FROM \"b\""
 
+  describe "set operations" do
+    it "UNION brackets both operands" do
+      let query = select' (cols ["id"])
+            # from "users"
+            # union (select' (cols ["user_id"]) # from "orders")
+            # formatInline
+      query `shouldEqual`
+        "(SELECT \"id\" FROM \"users\") UNION (SELECT \"user_id\" FROM \"orders\")"
+
+    it "UNION ALL" do
+      let query = select' (cols ["id"])
+            # from "users"
+            # unionAll (select' (cols ["user_id"]) # from "orders")
+            # formatInline
+      query `shouldEqual`
+        "(SELECT \"id\" FROM \"users\") UNION ALL (SELECT \"user_id\" FROM \"orders\")"
+
+    it "INTERSECT / INTERSECT ALL" do
+      let a = select' (cols ["id"]) # from "users"
+          b = select' (cols ["user_id"]) # from "orders"
+      formatInline (a # intersect b) `shouldEqual`
+        "(SELECT \"id\" FROM \"users\") INTERSECT (SELECT \"user_id\" FROM \"orders\")"
+      formatInline (a # intersectAll b) `shouldEqual`
+        "(SELECT \"id\" FROM \"users\") INTERSECT ALL (SELECT \"user_id\" FROM \"orders\")"
+
+    it "EXCEPT / EXCEPT ALL" do
+      let a = select' (cols ["id"]) # from "users"
+          b = select' (cols ["user_id"]) # from "orders"
+      formatInline (a # except b) `shouldEqual`
+        "(SELECT \"id\" FROM \"users\") EXCEPT (SELECT \"user_id\" FROM \"orders\")"
+      formatInline (a # exceptAll b) `shouldEqual`
+        "(SELECT \"id\" FROM \"users\") EXCEPT ALL (SELECT \"user_id\" FROM \"orders\")"
+
+    -- The bracketing is the assertion: a chain reads the same whatever
+    -- PostgreSQL's own precedence between the operators is.
+    it "chains left-associatively, each operand bracketed" do
+      let query = select' (cols ["id"])
+            # from "a"
+            # union (select' (cols ["id"]) # from "b")
+            # except (select' (cols ["id"]) # from "c")
+            # formatInline
+      query `shouldEqual`
+        "((SELECT \"id\" FROM \"a\") UNION (SELECT \"id\" FROM \"b\")) EXCEPT (SELECT \"id\" FROM \"c\")"
+
+    it "ORDER BY / LIMIT / OFFSET after the operation apply to the whole" do
+      let query = select' (cols ["id"])
+            # from "users"
+            # union (select' (cols ["user_id"]) # from "orders")
+            # orderBy [asc (col "id")]
+            # limit 10
+            # offset 5
+            # formatInline
+      query `shouldEqual`
+        "(SELECT \"id\" FROM \"users\") UNION (SELECT \"user_id\" FROM \"orders\") ORDER BY \"id\" ASC LIMIT 10 OFFSET 5"
+
+    -- The counterpart: an operand's own ORDER BY and LIMIT stay inside its
+    -- brackets rather than being lifted onto the combined result.
+    it "an operand keeps its own ORDER BY and LIMIT" do
+      let query = select' (cols ["id"])
+            # from "users"
+            # orderBy [asc (col "id")]
+            # limit 5
+            # unionAll (select' (cols ["user_id"]) # from "orders" # limit 3)
+            # formatInline
+      query `shouldEqual`
+        "(SELECT \"id\" FROM \"users\" ORDER BY \"id\" ASC LIMIT 5) UNION ALL (SELECT \"user_id\" FROM \"orders\" LIMIT 3)"
+
+    it "numbers parameters left to right across both operands" do
+      let result = select' (cols ["id"])
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # union
+                ( select' (cols ["user_id"])
+                    # from "orders"
+                    # where_ (col "status" .== str "paid")
+                )
+            # format
+      result.sql `shouldEqual`
+        "(SELECT \"id\" FROM \"users\" WHERE \"active\" = $1) UNION (SELECT \"user_id\" FROM \"orders\" WHERE \"status\" = $2)"
+      result.params `shouldEqual` [LitBoolean true, LitString "paid"]
+
+    -- A WITH clause on a set operation covers the statement, so it is emitted
+    -- once, ahead of both operands, and its parameters are numbered first.
+    it "a WITH clause precedes both operands" do
+      let result = select' (cols ["user_id"])
+            # from "paid"
+            # union (select' (cols ["user_id"]) # from "orders" # where_ (col "status" .== str "cancelled"))
+            # with_ "paid" (select' (cols ["user_id"]) # from "orders" # where_ (col "status" .== str "paid"))
+            # format
+      result.sql `shouldEqual`
+        "WITH \"paid\" AS (SELECT \"user_id\" FROM \"orders\" WHERE \"status\" = $1) (SELECT \"user_id\" FROM \"paid\") UNION (SELECT \"user_id\" FROM \"orders\" WHERE \"status\" = $2)"
+      result.params `shouldEqual` [LitString "paid", LitString "cancelled"]
+
+    it "nests as a derived table" do
+      let query = select' [star]
+            # fromSub
+                ( select' (cols ["id"])
+                    # from "users"
+                    # union (select' (cols ["user_id"]) # from "orders")
+                )
+                "ids"
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM ((SELECT \"id\" FROM \"users\") UNION (SELECT \"user_id\" FROM \"orders\")) AS \"ids\""
+
+    it "joins the two halves of a recursive CTE" do
+      let query = select' [star]
+            # withRecursive "counting"
+                ( select' [as (raw "1") "n"]
+                    # unionAll
+                        ( select' [expr (binOp "+" (col "n") (int 1))]
+                            # from "counting"
+                            # where_ (col "n" .< int 5)
+                        )
+                )
+            # from "counting"
+            # formatInline
+      query `shouldEqual`
+        "WITH RECURSIVE \"counting\" AS ((SELECT 1 AS \"n\") UNION ALL (SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 5)) SELECT * FROM \"counting\""
+
   describe "GROUP BY / HAVING" do
     it "GROUP BY with HAVING and aggregation" do
       let query = select' [expr (col "department"), as (raw "COUNT(*)") "headcount"]

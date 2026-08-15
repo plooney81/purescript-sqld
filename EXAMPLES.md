@@ -31,6 +31,7 @@ Regenerate with `make examples`.
 - [Scalar subqueries](#scalar-subqueries)
 - [Derived tables](#derived-tables)
 - [Joining a derived table](#joining-a-derived-table)
+- [Set operations](#set-operations)
 - [Common table expressions](#common-table-expressions)
 - [Recursive CTEs](#recursive-ctes)
 - [Pagination](#pagination)
@@ -500,6 +501,55 @@ JOIN (
 
 ---
 
+## Set operations
+
+`union`, `intersect` and `except` combine two result sets; each has an `All`
+variant that keeps duplicate rows. The query you pipe from is the left
+operand, so a chain reads in the order it is emitted.
+
+Both operands are bracketed, so a chain of mixed operators means what it
+reads like, and each operand keeps its own `ORDER BY` and `LIMIT`. Applying
+`orderBy`, `limit` or `offset` *after* the operation lands outside the
+brackets, so it applies to the combined result — here, active users who have
+never had an order cancelled.
+
+```purescript
+setOperations :: Query
+setOperations =
+  select' (cols [ "id" ])
+    # from "users"
+    # where_ (col "active" .== bool true)
+    # except
+        ( select' (cols [ "user_id" ])
+            # from "orders"
+            # where_ (col "status" .== str "cancelled")
+        )
+    # orderBy [ asc (col "id") ]
+    # limit 20
+```
+
+```sql
+(
+  SELECT "id"
+  FROM "users"
+  WHERE "active" = TRUE
+)
+EXCEPT
+(
+  SELECT "user_id"
+  FROM "orders"
+  WHERE "status" = 'cancelled'
+)
+ORDER BY "id" ASC
+LIMIT 20
+```
+
+Bound parameters: `$1` = `true`, `$2` = `"cancelled"`
+
+<sub>Parameterised: <code>(SELECT "id" FROM "users" WHERE "active" = $1) EXCEPT (SELECT "user_id" FROM "orders" WHERE "status" = $2) ORDER BY "id" ASC LIMIT 20</code></sub>
+
+---
+
 ## Common table expressions
 
 `with_` names an intermediate result set. A later CTE may reference an
@@ -557,9 +607,10 @@ Bound parameters: `$1` = `"paid"`, `$2` = `500`
 no change. `withCte` is the general form, and `cteColumns` names the output
 columns, which a recursive CTE usually wants.
 
-The two halves of a recursive CTE are joined by `UNION ALL`, and set
-operations are not in the AST yet — until they are, that half comes from
-`raw`.
+The two halves are joined by `unionAll`: an anchor term, then a recursive
+term that reads from the CTE being defined. The anchor's `1` is `raw` rather
+than `int 1` because a bare parameter in a select list gives PostgreSQL
+nothing to infer a type from.
 
 ```purescript
 recursiveCte :: Query
@@ -573,18 +624,34 @@ recursiveCte =
     # from "counting"
 
 countUp :: Query
-countUp = select' [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 10") ]
+countUp =
+  select' [ expr (raw "1") ]
+    # unionAll
+        ( select' [ expr (binOp "+" (col "n") (int 1)) ]
+            # from "counting"
+            # where_ (col "n" .< int 10)
+        )
 ```
 
 ```sql
 WITH RECURSIVE "counting" ("n") AS (
-  SELECT 1 UNION ALL SELECT "n" + 1 FROM "counting" WHERE "n" < 10
+  (
+    SELECT 1
+  )
+  UNION ALL
+  (
+    SELECT "n" + 1
+    FROM "counting"
+    WHERE "n" < 10
+  )
 )
 SELECT *
 FROM "counting"
 ```
 
-<sub>Parameterised: <code>WITH RECURSIVE "counting" ("n") AS (SELECT 1 UNION ALL SELECT "n" + 1 FROM "counting" WHERE "n" < 10) SELECT * FROM "counting"</code></sub>
+Bound parameters: `$1` = `1`, `$2` = `10`
+
+<sub>Parameterised: <code>WITH RECURSIVE "counting" ("n") AS ((SELECT 1) UNION ALL (SELECT "n" + $1 FROM "counting" WHERE "n" < $2)) SELECT * FROM "counting"</code></sub>
 
 ---
 

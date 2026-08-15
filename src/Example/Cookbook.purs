@@ -24,7 +24,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, emptyQuery)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, num, or, raw, str, sub, sum_, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, where_, withCte, with_)
+import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -249,6 +249,30 @@ derivedTableJoin =
         )
         (col "u.id" .== col "totals.user_id")
 
+-- #example set-operations
+-- # Set operations
+-- `union`, `intersect` and `except` combine two result sets; each has an `All`
+-- variant that keeps duplicate rows. The query you pipe from is the left
+-- operand, so a chain reads in the order it is emitted.
+--
+-- Both operands are bracketed, so a chain of mixed operators means what it
+-- reads like, and each operand keeps its own `ORDER BY` and `LIMIT`. Applying
+-- `orderBy`, `limit` or `offset` *after* the operation lands outside the
+-- brackets, so it applies to the combined result — here, active users who have
+-- never had an order cancelled.
+setOperations :: Query
+setOperations =
+  select' (cols [ "id" ])
+    # from "users"
+    # where_ (col "active" .== bool true)
+    # except
+        ( select' (cols [ "user_id" ])
+            # from "orders"
+            # where_ (col "status" .== str "cancelled")
+        )
+    # orderBy [ asc (col "id") ]
+    # limit 20
+
 -- #example common-table-expressions
 -- # Common table expressions
 -- `with_` names an intermediate result set. A later CTE may reference an
@@ -280,9 +304,10 @@ commonTableExpressions =
 -- no change. `withCte` is the general form, and `cteColumns` names the output
 -- columns, which a recursive CTE usually wants.
 --
--- The two halves of a recursive CTE are joined by `UNION ALL`, and set
--- operations are not in the AST yet — until they are, that half comes from
--- `raw`.
+-- The two halves are joined by `unionAll`: an anchor term, then a recursive
+-- term that reads from the CTE being defined. The anchor's `1` is `raw` rather
+-- than `int 1` because a bare parameter in a select list gives PostgreSQL
+-- nothing to infer a type from.
 recursiveCte :: Query
 recursiveCte =
   select' [ star ]
@@ -294,7 +319,13 @@ recursiveCte =
     # from "counting"
 
 countUp :: Query
-countUp = select' [ expr (raw "1 UNION ALL SELECT \"n\" + 1 FROM \"counting\" WHERE \"n\" < 10") ]
+countUp =
+  select' [ expr (raw "1") ]
+    # unionAll
+        ( select' [ expr (binOp "+" (col "n") (int 1)) ]
+            # from "counting"
+            # where_ (col "n" .< int 10)
+        )
 
 -- #example pagination
 -- # Pagination
@@ -383,6 +414,7 @@ cookbook =
   , { name: "scalar-subquery",      query: scalarSubquery }
   , { name: "derived-table",        query: derivedTable }
   , { name: "derived-table-join",   query: derivedTableJoin }
+  , { name: "set-operations",       query: setOperations }
   , { name: "common-table-expressions", query: commonTableExpressions }
   , { name: "recursive-cte",        query: recursiveCte }
   , { name: "pagination",           query: pagination }

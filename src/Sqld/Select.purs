@@ -3,7 +3,7 @@ module Sqld.Select where
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<), (<>), map)
-import Sqld.Core (Cte(..), Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), emptyQuery)
+import Sqld.Core (Cte(..), Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
 import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -98,6 +98,55 @@ cteColumns columns (Cte c) = Cte (c { columns = columns })
 
 cteRecursive :: Cte -> Cte
 cteRecursive (Cte c) = Cte (c { recursive = true })
+
+-- ---------------------------------------------------------------------------
+-- Set operations
+-- ---------------------------------------------------------------------------
+
+-- | `UNION` — the rows of both queries, duplicates removed.
+-- |
+-- | The query being piped into is the left operand, so a chain reads in the
+-- | order it is emitted:
+-- |
+-- |     select' (cols [ "id" ]) # from "users"
+-- |       # union (select' (cols [ "user_id" ]) # from "orders")
+-- |     -- (SELECT "id" FROM "users") UNION (SELECT "user_id" FROM "orders")
+-- |
+-- | Both operands are bracketed, so a chain of mixed operators means what it
+-- | reads like, and each operand keeps its own `ORDER BY` and `LIMIT`. An
+-- | `orderBy`, `limit` or `offset` applied *after* the set operation lands
+-- | outside the brackets and so applies to the combined result — as it does in
+-- | SQL.
+union :: Query -> Query -> Query
+union = combine Union false
+
+-- | `UNION ALL` — as `union`, keeping duplicate rows. Also the way the two
+-- | halves of a recursive CTE are joined.
+unionAll :: Query -> Query -> Query
+unionAll = combine Union true
+
+-- | `INTERSECT` — the rows in both queries.
+intersect :: Query -> Query -> Query
+intersect = combine Intersect false
+
+intersectAll :: Query -> Query -> Query
+intersectAll = combine Intersect true
+
+-- | `EXCEPT` — the rows of the left query that the right one does not produce.
+except :: Query -> Query -> Query
+except = combine Except false
+
+exceptAll :: Query -> Query -> Query
+exceptAll = combine Except true
+
+-- | The general form: any set operator, with or without `ALL`.
+-- |
+-- | The result is a fresh query holding the two operands, so it carries no
+-- | select list or `FROM` of its own — only `with_`, `orderBy`, `limit` and
+-- | `offset` add to a set operation.
+combine :: SetOp -> Boolean -> Query -> Query -> Query
+combine op all_ right left =
+  emptyQuery { setOp = Just $ SetOperation { op, all: all_, left, right } }
 
 -- ---------------------------------------------------------------------------
 -- Joins
@@ -209,6 +258,9 @@ desc e = { expr: e, dir: Desc }
 mergeQueries :: Query -> Query -> Query
 mergeQueries base override =
   { with:    base.with <> override.with
+  , setOp:   case override.setOp of
+               Nothing -> base.setOp
+               Just _  -> override.setOp
   , select:  if Array.null override.select  then base.select  else override.select
   , from:    case override.from of
                Nothing -> base.from
