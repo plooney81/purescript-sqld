@@ -26,9 +26,9 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Expr(..), Frame, FrameBound(..), FrameMode(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -88,6 +88,33 @@ handWritten =
     , query: select' [ expr (col "department"), as (raw "COUNT(*)") "n" ]
         # from "users"
         # groupBy [ col "department" ]
+    }
+
+  -- DISTINCT -----------------------------------------------------------------
+
+  , { name: "distinct"
+    , query: select' (cols [ "department" ]) # distinct # from "users"
+    }
+
+  -- PostgreSQL requires the leading ORDER BY expressions to match the
+  -- DISTINCT ON ones, which is the rule this entry is here to hold us to:
+  -- swap the two ORDER BY terms and PREPARE fails.
+  , { name: "distinct-on"
+    , query: select' (cols [ "user_id", "total" ])
+        # distinctOn [ col "user_id" ]
+        # from "orders"
+        # orderBy [ asc (col "user_id"), desc (col "placed_at") ]
+    }
+
+  -- A DISTINCT ON expression sits ahead of the select list in the emitted SQL,
+  -- so its parameters are numbered before the WHERE clause's. No ORDER BY
+  -- here: two occurrences of the same expression would carry different
+  -- parameter numbers, and PostgreSQL matches them as written.
+  , { name: "distinct-on-parameter-ordering"
+    , query: select' (cols [ "user_id", "total" ])
+        # distinctOn [ coalesce [ col "status", str "unknown" ] ]
+        # from "orders"
+        # where_ (col "total" .> num 10.0)
     }
 
   -- Literals -----------------------------------------------------------------
@@ -920,6 +947,11 @@ frameBoundTag = case _ of
   Following _ -> "FrameBound.Following"
   UnboundedFollowing -> "FrameBound.UnboundedFollowing"
 
+distinctTags :: Distinct -> Array String
+distinctTags = case _ of
+  Distinct -> [ "Query.distinct" ]
+  DistinctOn exprs -> "Query.distinctOn" : Array.concatMap exprTags exprs
+
 literalTag :: Literal -> String
 literalTag = case _ of
   LitInt _ -> "LitInt"
@@ -983,6 +1015,9 @@ queryTags :: Query -> Array String
 queryTags q =
   Array.concatMap cteTags q.with
     <> foldClause "Query.setOp" (map setOperationTags q.setOp)
+    <> (case q.distinct of
+          Nothing -> []
+          Just d -> distinctTags d)
     <> Array.concatMap selectTags q.select
     <> foldClause "Query.from" (map (relationTags "Query.from") q.from)
     <> Array.concatMap (\j -> joinTypeTag j.type_ : relationTags "Query.join" j.relation <> exprTags j.on) q.joins
@@ -1075,6 +1110,8 @@ requiredTags = Array.sort
   , "Query.with"
   , "Query.with.columns"
   , "Query.with.recursive"
+  , "Query.distinct"
+  , "Query.distinctOn"
   , "Query.setOp"
   , "SetOp.Union"
   , "SetOp.Union.all"

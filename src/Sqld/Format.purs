@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Expr(..), FormattedQuery, Frame, FrameBound(..), FrameMode(..), Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, FrameBound(..), FrameMode(..), Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -135,7 +135,7 @@ formatBody layout q state = case q.setOp of
 formatSelectBody :: Layout -> Query -> WithBindings String
 formatSelectBody layout q state0 = Tuple sql s6
   where
-  Tuple selectSql  s1 = formatSelect  layout q.select  state0
+  Tuple selectSql  s1 = formatSelect  layout q.distinct q.select state0
   Tuple fromSql    s2 = formatFrom    layout q.from    s1
   Tuple joinsSql   s3 = formatJoins   layout q.joins   s2
   Tuple whereSql   s4 = formatWhere   layout q.where_  s3
@@ -196,10 +196,24 @@ formatCte layout (Cte c) state =
 
   Tuple sql s' = formatQuery (nest layout) c.query state
 
-formatSelect :: Layout -> Array SelectExpr -> WithBindings String
-formatSelect layout exprs state = Tuple ("SELECT " <> intercalate ", " parts) s'
+formatSelect :: Layout -> Maybe Distinct -> Array SelectExpr -> WithBindings String
+formatSelect layout d exprs state0 = Tuple ("SELECT " <> distinctSql <> intercalate ", " parts) s2
   where
-  Tuple parts s' = mapAccum (formatSelectExpr layout) state exprs
+  -- The `DISTINCT ON` expressions precede the select list in the emitted SQL,
+  -- so their parameters are numbered first.
+  Tuple distinctSql s1 = formatDistinct layout d      state0
+  Tuple parts       s2 = mapAccum (formatSelectExpr layout) s1 exprs
+
+-- | `DISTINCT`, or `DISTINCT ON (…)`, carrying the space that separates it from
+-- | the select list. Absent is SQL's `ALL`, which is the default and emits
+-- | nothing.
+formatDistinct :: Layout -> Maybe Distinct -> WithBindings String
+formatDistinct _ Nothing               state = Tuple mempty state
+formatDistinct _ (Just Distinct)       state = Tuple "DISTINCT " state
+formatDistinct layout (Just (DistinctOn exprs)) state =
+  Tuple ("DISTINCT ON (" <> intercalate ", " parts <> ") ") s'
+  where
+  Tuple parts s' = mapAccum (formatExpr layout) state exprs
 
 formatSelectExpr :: Layout -> SelectExpr -> WithBindings String
 formatSelectExpr _ SelectStar state =

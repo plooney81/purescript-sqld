@@ -24,7 +24,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
+import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -168,6 +168,37 @@ chronological = byUser # orderWindow [ asc (col "placed_at") ]
 
 runningTotal :: Window
 runningTotal = chronological # withFrame (rows unboundedPreceding currentRow)
+
+-- #example distinct
+-- # DISTINCT
+-- Duplicate rows collapse to one, compared across the whole select list — here,
+-- the departments with at least one active user.
+distinctExample :: Query
+distinctExample =
+  select' (cols [ "department" ])
+    # distinct
+    # from "users"
+    # where_ (col "active" .== bool true)
+    # orderBy [ asc (col "department") ]
+
+-- #example distinct-on
+-- # DISTINCT ON
+-- PostgreSQL's own, and the shortest way to say "one row per group": it keeps
+-- the first row of each group of the named expressions, where "first" is
+-- whatever the `orderBy` says — so this is each user's most recent paid order,
+-- without a window function or a self-join.
+--
+-- PostgreSQL requires the leading `orderBy` expressions to match the ones given
+-- to `distinctOn`, a rule it enforces itself and that the validation harness
+-- holds this example to. `distinct` and `distinctOn` share one field, because a
+-- `SELECT` is one or the other and never both: whichever is applied last wins.
+distinctOnExample :: Query
+distinctOnExample =
+  select' (cols [ "user_id", "status", "total", "placed_at" ])
+    # distinctOn [ col "user_id" ]
+    # from "orders"
+    # where_ (col "status" .== str "paid")
+    # orderBy [ asc (col "user_id"), desc (col "placed_at") ]
 
 -- #example functions-and-casts
 -- # Functions, casts and arbitrary operators
@@ -443,6 +474,8 @@ cookbook =
   , { name: "full-join",            query: fullJoinExample }
   , { name: "aggregation",          query: aggregation }
   , { name: "window-functions",     query: windowFunctions }
+  , { name: "distinct",             query: distinctExample }
+  , { name: "distinct-on",          query: distinctOnExample }
   , { name: "functions-and-casts",  query: functionsAndCasts }
   , { name: "exists",               query: existsExample }
   , { name: "not-exists",           query: notExistsExample }

@@ -3,7 +3,7 @@ module Sqld.Select where
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<), (<>), map)
-import Sqld.Core (Cte(..), Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
 import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -55,6 +55,32 @@ select exprs q = q { select = q.select <> exprs }
 -- | `emptyQuery` at the end.
 select' :: Array SelectExpr -> Query
 select' exprs = select exprs emptyQuery
+
+-- | `SELECT DISTINCT` — duplicate rows collapse to one.
+-- |
+-- | `distinct` and `distinctOn` share a field, because a `SELECT` is one or the
+-- | other and never both: whichever is applied last wins.
+distinct :: Query -> Query
+distinct q = q { distinct = Just Distinct }
+
+-- | `SELECT DISTINCT ON (expr, …)` — PostgreSQL's own: the first row of each
+-- | group of the given expressions survives.
+-- |
+-- |     select' (cols [ "user_id", "total" ])
+-- |       # distinctOn [ col "user_id" ]
+-- |       # from "orders"
+-- |       # orderBy [ asc (col "user_id"), desc (col "placed_at") ]
+-- |
+-- | Which row is "first" is whatever the `ORDER BY` says, and PostgreSQL
+-- | requires its leading expressions to match the ones named here — a rule it
+-- | enforces itself, rather than one this type expresses.
+-- |
+-- | An empty list falls back to plain `DISTINCT`: `DISTINCT ON ()` is not
+-- | something PostgreSQL parses, and an empty list arises naturally when the
+-- | expressions are driven by user input.
+distinctOn :: Array Expr -> Query -> Query
+distinctOn [] q = distinct q
+distinctOn exprs q = q { distinct = Just $ DistinctOn exprs }
 
 where_ :: Expr -> Query -> Query
 where_ e q = q { where_ = Just $ case q.where_ of
@@ -257,29 +283,32 @@ desc e = { expr: e, dir: Desc }
 
 mergeQueries :: Query -> Query -> Query
 mergeQueries base override =
-  { with:    base.with <> override.with
-  , setOp:   case override.setOp of
-               Nothing -> base.setOp
-               Just _  -> override.setOp
-  , select:  if Array.null override.select  then base.select  else override.select
-  , from:    case override.from of
-               Nothing -> base.from
-               Just _  -> override.from
-  , joins:   base.joins <> override.joins
-  , where_:  case base.where_, override.where_ of
-               Nothing, Nothing -> Nothing
-               Just a,  Nothing -> Just a
-               Nothing, Just b  -> Just b
-               Just a,  Just b  -> Just (And [a, b])
-  , groupBy: base.groupBy <> override.groupBy
-  , having:  case override.having of
-               Nothing -> base.having
-               Just _  -> override.having
-  , orderBy: if Array.null override.orderBy then base.orderBy else override.orderBy
-  , limit:   case override.limit of
-               Nothing -> base.limit
-               Just _  -> override.limit
-  , offset:  case override.offset of
-               Nothing -> base.offset
-               Just _  -> override.offset
+  { with:     base.with <> override.with
+  , setOp:    case override.setOp of
+                Nothing -> base.setOp
+                Just _  -> override.setOp
+  , distinct: case override.distinct of
+                Nothing -> base.distinct
+                Just _  -> override.distinct
+  , select:   if Array.null override.select  then base.select  else override.select
+  , from:     case override.from of
+                Nothing -> base.from
+                Just _  -> override.from
+  , joins:    base.joins <> override.joins
+  , where_:   case base.where_, override.where_ of
+                Nothing, Nothing -> Nothing
+                Just a,  Nothing -> Just a
+                Nothing, Just b  -> Just b
+                Just a,  Just b  -> Just (And [a, b])
+  , groupBy:  base.groupBy <> override.groupBy
+  , having:   case override.having of
+                Nothing -> base.having
+                Just _  -> override.having
+  , orderBy:  if Array.null override.orderBy then base.orderBy else override.orderBy
+  , limit:    case override.limit of
+                Nothing -> base.limit
+                Just _  -> override.limit
+  , offset:   case override.offset of
+                Nothing -> base.offset
+                Just _  -> override.offset
   }
