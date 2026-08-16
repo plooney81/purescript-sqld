@@ -114,6 +114,79 @@ selectSpec = describe "Sqld.Select" do
       query `shouldEqual`
         "SELECT \"department\", COUNT(*) AS \"headcount\" FROM \"users\" GROUP BY \"department\""
 
+  describe "DISTINCT" do
+    it "SELECT DISTINCT" do
+      let query = select' (cols ["department"])
+            # distinct
+            # from "users"
+            # formatInline
+      query `shouldEqual` "SELECT DISTINCT \"department\" FROM \"users\""
+
+    it "DISTINCT ON, bracketed ahead of the select list" do
+      let query = select' (cols ["user_id", "total"])
+            # distinctOn [col "user_id"]
+            # from "orders"
+            # orderBy [asc (col "user_id"), desc (col "placed_at")]
+            # formatInline
+      query `shouldEqual`
+        "SELECT DISTINCT ON (\"user_id\") \"user_id\", \"total\" FROM \"orders\" ORDER BY \"user_id\" ASC, \"placed_at\" DESC"
+
+    it "DISTINCT ON several expressions, comma-separated" do
+      let query = select' [star]
+            # distinctOn [col "user_id", upper (col "status")]
+            # from "orders"
+            # formatInline
+      query `shouldEqual`
+        "SELECT DISTINCT ON (\"user_id\", UPPER(\"status\")) * FROM \"orders\""
+
+    -- The DISTINCT ON expressions precede the select list in the emitted SQL,
+    -- so they are numbered first.
+    it "numbers parameters in emitted-SQL order" do
+      let result = select' [as (coalesce [col "email", str "none"]) "email"]
+            # distinctOn [coalesce [col "department", str "unknown"]]
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # format
+      result.sql `shouldEqual`
+        "SELECT DISTINCT ON (COALESCE(\"department\", $1)) COALESCE(\"email\", $2) AS \"email\" FROM \"users\" WHERE \"active\" = $3"
+      result.params `shouldEqual` [LitString "unknown", LitString "none", LitBoolean true]
+
+    it "is mutually exclusive: the later call wins" do
+      let onThenPlain = select' (cols ["department"])
+            # distinctOn [col "user_id"]
+            # distinct
+            # from "users"
+            # formatInline
+          plainThenOn = select' (cols ["department"])
+            # distinct
+            # distinctOn [col "user_id"]
+            # from "users"
+            # formatInline
+      onThenPlain `shouldEqual` "SELECT DISTINCT \"department\" FROM \"users\""
+      plainThenOn `shouldEqual`
+        "SELECT DISTINCT ON (\"user_id\") \"department\" FROM \"users\""
+
+    -- `DISTINCT ON ()` is not something PostgreSQL parses, and an empty list
+    -- arises naturally when the expressions come from user input.
+    it "falls back to plain DISTINCT on an empty list" do
+      let query = select' (cols ["department"])
+            # distinctOn []
+            # from "users"
+            # formatInline
+      query `shouldEqual` "SELECT DISTINCT \"department\" FROM \"users\""
+
+    it "mergeQueries takes the right-hand side's" do
+      let base     = select' (cols ["department"]) # distinct # from "users"
+          override = emptyQuery # distinctOn [col "department"]
+          query    = mergeQueries base override # formatInline
+      query `shouldEqual`
+        "SELECT DISTINCT ON (\"department\") \"department\" FROM \"users\""
+
+    it "mergeQueries keeps the base's when the override sets none" do
+      let query = mergeQueries (select' (cols ["department"]) # distinct # from "users") emptyQuery
+            # formatInline
+      query `shouldEqual` "SELECT DISTINCT \"department\" FROM \"users\""
+
   describe "FROM clause" do
     it "bare table" do
       let query = select' [star]

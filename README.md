@@ -55,9 +55,9 @@ await pool.query(query.sql, query.params);
 ## Examples
 
 **[EXAMPLES.md](EXAMPLES.md)** is a worked cookbook — filtering, joins,
-aggregation, window functions, subqueries, derived tables, common table
-expressions, composing fragments from optional parameters, and when to reach
-for `raw`.
+aggregation, window functions, `DISTINCT ON`, subqueries, derived tables,
+common table expressions, composing fragments from optional parameters, and
+when to reach for `raw`.
 
 It is generated from [`src/Example/Cookbook.purs`](src/Example/Cookbook.purs),
 and every example is replayed against a live PostgreSQL server by the
@@ -68,7 +68,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Cte`, `SetOperation`, `Window`, `emptyQuery`, `emptyWindow` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `Cte`, `SetOperation`, `Window`, `emptyQuery`, `emptyWindow` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
@@ -85,6 +85,8 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 |---|---|
 | `select :: Array SelectExpr -> Query -> Query` | Append to the SELECT list |
 | `select' :: Array SelectExpr -> Query` | Start a query from its select list, without naming `emptyQuery` |
+| `distinct :: Query -> Query` | SELECT DISTINCT |
+| `distinctOn :: Array Expr -> Query -> Query` | `SELECT DISTINCT ON (…)` — first row per group |
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
 | `fromSub :: Query -> String -> Query -> Query` | FROM a derived table (subquery + alias) |
@@ -143,6 +145,40 @@ select' (cols ["department"])
 Keeping `SelectExpr` distinct from `Expr` is deliberate: it is what stops
 `as` and `star` from type-checking in a `WHERE` clause, where they are not
 valid SQL.
+
+### DISTINCT
+
+`distinct` drops duplicate rows. `distinctOn` is PostgreSQL's own, and is the
+shortest way to say "one row per group" — it keeps the first row of each group
+of the given expressions:
+
+```purescript
+select' (cols ["department"]) # distinct # from "users"
+-- SELECT DISTINCT "department" FROM "users"
+
+select' (cols ["user_id", "total"])
+  # distinctOn [col "user_id"]
+  # from "orders"
+  # orderBy [asc (col "user_id"), desc (col "placed_at")]
+-- SELECT DISTINCT ON ("user_id") "user_id", "total" FROM "orders"
+--   ORDER BY "user_id" ASC, "placed_at" DESC
+```
+
+Which row is "first" is whatever the `ORDER BY` says, and PostgreSQL requires
+its leading expressions to match the ones given to `distinctOn` — a rule it
+enforces itself (`42P10`) rather than one the type expresses. For the same
+reason, avoid an expression carrying a parameter in both places: the two
+occurrences get different parameter numbers, and PostgreSQL matches them as
+written.
+
+The two builders share one field, because a `SELECT` is one or the other and
+never both — whichever is applied last wins, and `mergeQueries` takes the
+right-hand side's. `distinctOn []` falls back to plain `DISTINCT`, since
+`DISTINCT ON ()` is not something PostgreSQL parses. `ALL` has no explicit
+spelling: it is the default, and adds nothing.
+
+The `DISTINCT ON` expressions come before the select list in the emitted SQL,
+so their parameters are numbered first.
 
 ### Expressions
 

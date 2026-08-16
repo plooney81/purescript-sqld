@@ -187,42 +187,57 @@ newtype SetOperation = SetOperation
   , right :: Query
   }
 
+-- | Which rows a `SELECT` keeps.
+-- |
+-- | `Distinct` is SQL's own `DISTINCT`: duplicate rows collapse to one.
+-- | `DistinctOn` is PostgreSQL's, and keeps the first row of each group of the
+-- | given expressions — where "first" is whatever the `ORDER BY` says, which is
+-- | why PostgreSQL requires its leading expressions to match these.
+-- |
+-- | The two are one field rather than two, because a `SELECT` is one or the
+-- | other and never both. Absent is `ALL`, the default: every row survives.
+data Distinct
+  = Distinct
+  | DistinctOn (Array Expr)
+
 -- | A `SELECT` statement.
 -- |
 -- | `setOp` is what makes a query a set operation rather than a single
 -- | `SELECT`. When it is present the operands supply the rows, so this record's
--- | `select`, `from`, `joins`, `where_`, `groupBy` and `having` have nothing to
--- | emit; `with`, `orderBy`, `limit` and `offset` still do, and apply to the
--- | combined result. The `Sqld.Select` builders start such a query from
+-- | `distinct`, `select`, `from`, `joins`, `where_`, `groupBy` and `having` have
+-- | nothing to emit; `with`, `orderBy`, `limit` and `offset` still do, and apply
+-- | to the combined result. The `Sqld.Select` builders start such a query from
 -- | `emptyQuery`, so the unused fields stay empty — applying `select` or `from`
 -- | to a set operation afterwards has no effect on the SQL.
 type Query =
-  { with    :: Array Cte
-  , setOp   :: Maybe SetOperation
-  , select  :: Array SelectExpr
-  , from    :: Maybe Relation
-  , joins   :: Array Join
-  , where_  :: Maybe Expr
-  , groupBy :: Array Expr
-  , having  :: Maybe Expr
-  , orderBy :: Array OrderExpr
-  , limit   :: Maybe Int
-  , offset  :: Maybe Int
+  { with     :: Array Cte
+  , setOp    :: Maybe SetOperation
+  , distinct :: Maybe Distinct
+  , select   :: Array SelectExpr
+  , from     :: Maybe Relation
+  , joins    :: Array Join
+  , where_   :: Maybe Expr
+  , groupBy  :: Array Expr
+  , having   :: Maybe Expr
+  , orderBy  :: Array OrderExpr
+  , limit    :: Maybe Int
+  , offset   :: Maybe Int
   }
 
 emptyQuery :: Query
 emptyQuery =
-  { with:    []
-  , setOp:   Nothing
-  , select:  []
-  , from:    Nothing
-  , joins:   []
-  , where_:  Nothing
-  , groupBy: []
-  , having:  Nothing
-  , orderBy: []
-  , limit:   Nothing
-  , offset:  Nothing
+  { with:     []
+  , setOp:    Nothing
+  , distinct: Nothing
+  , select:   []
+  , from:     Nothing
+  , joins:    []
+  , where_:   Nothing
+  , groupBy:  []
+  , having:   Nothing
+  , orderBy:  []
+  , limit:    Nothing
+  , offset:   Nothing
   }
 
 type FormattedQuery =

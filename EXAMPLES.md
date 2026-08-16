@@ -25,6 +25,8 @@ Regenerate with `make examples`.
 - [Full joins](#full-joins)
 - [Aggregation](#aggregation)
 - [Window functions](#window-functions)
+- [DISTINCT](#distinct)
+- [DISTINCT ON](#distinct-on)
 - [Functions, casts and arbitrary operators](#functions-casts-and-arbitrary-operators)
 - [EXISTS](#exists)
 - [NOT EXISTS](#not-exists)
@@ -312,6 +314,69 @@ WHERE "status" = 'paid'
 Bound parameters: `$1` = `1`, `$2` = `"paid"`
 
 <sub>Parameterised: <code>SELECT "user_id", "placed_at", "total", ROW_NUMBER() OVER (PARTITION BY "user_id" ORDER BY "total" DESC) AS "biggest_first", LAG("total", $1) OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC) AS "previous_total", SUM("total") OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "running_total" FROM "orders" WHERE "status" = $2</code></sub>
+
+---
+
+## DISTINCT
+
+Duplicate rows collapse to one, compared across the whole select list — here,
+the departments with at least one active user.
+
+```purescript
+distinctExample :: Query
+distinctExample =
+  select' (cols [ "department" ])
+    # distinct
+    # from "users"
+    # where_ (col "active" .== bool true)
+    # orderBy [ asc (col "department") ]
+```
+
+```sql
+SELECT DISTINCT "department"
+FROM "users"
+WHERE "active" = TRUE
+ORDER BY "department" ASC
+```
+
+Bound parameters: `$1` = `true`
+
+<sub>Parameterised: <code>SELECT DISTINCT "department" FROM "users" WHERE "active" = $1 ORDER BY "department" ASC</code></sub>
+
+---
+
+## DISTINCT ON
+
+PostgreSQL's own, and the shortest way to say "one row per group": it keeps
+the first row of each group of the named expressions, where "first" is
+whatever the `orderBy` says — so this is each user's most recent paid order,
+without a window function or a self-join.
+
+PostgreSQL requires the leading `orderBy` expressions to match the ones given
+to `distinctOn`, a rule it enforces itself and that the validation harness
+holds this example to. `distinct` and `distinctOn` share one field, because a
+`SELECT` is one or the other and never both: whichever is applied last wins.
+
+```purescript
+distinctOnExample :: Query
+distinctOnExample =
+  select' (cols [ "user_id", "status", "total", "placed_at" ])
+    # distinctOn [ col "user_id" ]
+    # from "orders"
+    # where_ (col "status" .== str "paid")
+    # orderBy [ asc (col "user_id"), desc (col "placed_at") ]
+```
+
+```sql
+SELECT DISTINCT ON ("user_id") "user_id", "status", "total", "placed_at"
+FROM "orders"
+WHERE "status" = 'paid'
+ORDER BY "user_id" ASC, "placed_at" DESC
+```
+
+Bound parameters: `$1` = `"paid"`
+
+<sub>Parameterised: <code>SELECT DISTINCT ON ("user_id") "user_id", "status", "total", "placed_at" FROM "orders" WHERE "status" = $1 ORDER BY "user_id" ASC, "placed_at" DESC</code></sub>
 
 ---
 
