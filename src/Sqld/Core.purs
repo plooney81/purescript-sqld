@@ -93,10 +93,28 @@ instance Keyword JoinType where
   keyword RightJoin = "RIGHT JOIN"
   keyword FullJoin  = "FULL JOIN"
 
+-- | How a join finds the rows it pairs — and, because SQL ties the two
+-- | together, which spelling of `JOIN` carries it.
+-- |
+-- | The kind of join sits inside the condition rather than beside it, so the
+-- | combinations SQL has no syntax for cannot be written down. `Cross` takes no
+-- | `JoinType`, because `CROSS JOIN` is neither outer nor conditional;
+-- | `Natural` takes one but no expression, because `NATURAL` *is* the
+-- | condition. A `JoinType` field alongside an independent condition would let
+-- | `CROSS JOIN … ON (…)` be built and leave PostgreSQL to reject it.
+-- |
+-- | `Using` holds column names, not expressions: `USING` matches columns
+-- | present in both relations, so its contents are identifiers and are quoted
+-- | as such.
+data JoinCondition
+  = On JoinType Expr
+  | Using JoinType (Array String)
+  | Natural JoinType
+  | Cross
+
 type Join =
-  { type_     :: JoinType
-  , relation  :: Relation
-  , on        :: Expr
+  { relation  :: Relation
+  , condition :: JoinCondition
   }
 
 data OrderDir = Asc | Desc

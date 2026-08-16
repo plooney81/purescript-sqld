@@ -24,7 +24,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -114,6 +114,39 @@ fullJoinExample =
   select' (cols [ "u.name", "p.bio" ])
     # fromAs "users" "u"
     # fullJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
+
+-- #example cross-join
+-- # Cross joins
+-- Every row of one relation against every row of the other. `crossJoin` takes
+-- no condition, and the AST has none to give it: `CROSS JOIN … ON (…)` is not
+-- SQL, so it is not a query this library can build.
+crossJoinExample :: Query
+crossJoinExample =
+  select' (cols [ "users.name", "departments.building" ])
+    # from "users"
+    # crossJoin "departments"
+
+-- #example join-using
+-- # Joining on shared column names
+-- `USING` matches columns of the same name in both relations and collapses
+-- each pair into one output column — which is why `"user_id"` below is
+-- unambiguous, where the equivalent `ON` would leave two of it.
+joinUsingExample :: Query
+joinUsingExample =
+  select' (cols [ "user_id", "status", "bio" ])
+    # from "orders"
+    # joinUsing InnerJoin "profiles" [ "user_id" ]
+
+-- #example natural-join
+-- # Natural joins
+-- `NATURAL` is `USING` with the column list left to the schema: it matches on
+-- every name the two relations share. Convenient, and worth weighing against
+-- the fact that a column added to either table silently changes the result.
+naturalJoinExample :: Query
+naturalJoinExample =
+  select' (cols [ "name", "building" ])
+    # from "users"
+    # naturalJoin LeftJoin "departments"
 
 -- #example aggregation
 -- # Aggregation
@@ -472,6 +505,9 @@ cookbook =
   , { name: "joins",                query: joins }
   , { name: "right-join",           query: rightJoinExample }
   , { name: "full-join",            query: fullJoinExample }
+  , { name: "cross-join",           query: crossJoinExample }
+  , { name: "join-using",           query: joinUsingExample }
+  , { name: "natural-join",         query: naturalJoinExample }
   , { name: "aggregation",          query: aggregation }
   , { name: "window-functions",     query: windowFunctions }
   , { name: "distinct",             query: distinctExample }

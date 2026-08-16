@@ -68,7 +68,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `Cte`, `SetOperation`, `Window`, `emptyQuery`, `emptyWindow`, `Keyword` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `Cte`, `SetOperation`, `Window`, `JoinType`, `JoinCondition`, `emptyQuery`, `emptyWindow`, `Keyword` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
@@ -96,7 +96,11 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `withCte :: Cte -> Query -> Query` | General form; use it to name a CTE's output columns |
 | `innerJoin` / `leftJoin` / `rightJoin` / `fullJoin` | `:: String -> Expr -> Query -> Query` |
 | `innerJoinAs` / `leftJoinAs` / `rightJoinAs` / `fullJoinAs` | `:: String -> String -> Expr -> Query -> Query` |
-| `joinOn :: JoinType -> Relation -> Expr -> Query -> Query` | General form; use it to join a derived table |
+| `joinOn :: JoinType -> Relation -> Expr -> Query -> Query` | General `ON` form; use it to join a derived table |
+| `crossJoin :: String -> Query -> Query` | `CROSS JOIN` — every row against every row, no condition |
+| `joinUsing :: JoinType -> String -> Array String -> Query -> Query` | `JOIN … USING ("a", "b")` — match on shared column names |
+| `naturalJoin :: JoinType -> String -> Query -> Query` | `NATURAL <kind> JOIN` — match on every shared column |
+| `joinRel :: Relation -> JoinCondition -> Query -> Query` | Most general form; any relation, any join condition |
 | `union` / `unionAll` | `:: Query -> Query -> Query` — the rows of both, duplicates removed / kept |
 | `intersect` / `intersectAll` | `:: Query -> Query -> Query` — the rows in both |
 | `except` / `exceptAll` | `:: Query -> Query -> Query` — the left query's rows, minus the right's |
@@ -291,6 +295,42 @@ never needs bracketing. PostgreSQL allows one in `SELECT` and `ORDER BY` only,
 and rejects it in `WHERE`, `GROUP BY` and `HAVING`; the type does not express
 that, so it is the database that reports the mistake. Named windows
 (`WINDOW w AS (…)`) are not supported.
+
+### Joins
+
+A join is a relation and a condition, and SQL ties the two together: `ON` and
+`USING` take a join kind, `NATURAL` takes a kind but no expression, and `CROSS`
+takes neither. `JoinCondition` pairs them for that reason, so the combinations
+PostgreSQL has no syntax for are ones the builders cannot produce:
+
+```purescript
+select' [star] # from "orders" # joinUsing InnerJoin "profiles" ["user_id"]
+-- SELECT * FROM "orders" JOIN "profiles" USING ("user_id")
+
+select' [star] # from "users" # naturalJoin LeftJoin "departments"
+-- SELECT * FROM "users" NATURAL LEFT JOIN "departments"
+
+select' [star] # from "users" # crossJoin "departments"
+-- SELECT * FROM "users" CROSS JOIN "departments"
+```
+
+`USING` names identifiers rather than values, so its columns are quoted rather
+than bound as parameters; it also collapses each matched pair into a single
+output column, which `ON` does not. `NATURAL` leaves the column list to the
+schema — every name the two relations share — so a column added to either table
+silently changes what the query means.
+
+`crossJoin`, `joinUsing` and `naturalJoin` take a table name. For an aliased or
+derived join target, `joinRel` takes any relation with any condition:
+
+```purescript
+select' [star] # from "users" # joinRel (relAs "departments" "d") Cross
+-- SELECT * FROM "users" CROSS JOIN "departments" AS "d"
+```
+
+`joinUsing` with an empty column list falls back to `ON (TRUE)`: `USING ()` is
+not something PostgreSQL parses, and no columns to match on is what `and []`
+already means.
 
 ### Derived tables
 

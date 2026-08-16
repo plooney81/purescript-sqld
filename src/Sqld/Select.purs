@@ -3,7 +3,7 @@ module Sqld.Select where
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
 import Prelude (($), (<<<), (<>), map)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), JoinCondition(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
 import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -178,11 +178,59 @@ combine op all_ right left =
 -- Joins
 -- ---------------------------------------------------------------------------
 
--- | The general form. The named helpers below cover the common cases; reach
--- | for this one to join against a derived table.
+-- | The most general form: any relation, any condition. Reach for it to join a
+-- | derived table with a condition other than `ON`, or an aliased relation to
+-- | one:
+-- |
+-- |     emptyQuery # joinRel (relAs "departments" "d") Cross
+-- |     -- CROSS JOIN "departments" AS "d"
+joinRel :: Relation -> JoinCondition -> Query -> Query
+joinRel relation condition q =
+  q { joins = q.joins <> [ { relation, condition } ] }
+
+-- | The general `ON` form. The named helpers below cover the common cases;
+-- | reach for this one to join against a derived table.
 joinOn :: JoinType -> Relation -> Expr -> Query -> Query
-joinOn type_ relation on q =
-  q { joins = q.joins <> [ { type_, relation, on } ] }
+joinOn type_ relation on = joinRel relation (On type_ on)
+
+-- | `CROSS JOIN` — every row of the left relation paired with every row of the
+-- | right. A cartesian product, spelled so that it reads as one on purpose.
+-- |
+-- | It takes no condition, and the type says so: `CROSS JOIN … ON (…)` is not
+-- | something PostgreSQL parses, and not something `JoinCondition` can express.
+crossJoin :: String -> Query -> Query
+crossJoin table = joinRel (rel table) Cross
+
+-- | `JOIN … USING ("a", "b")` — matches on columns of those names in both
+-- | relations, and collapses each pair to a single output column.
+-- |
+-- |     select' [ star ]
+-- |       # from "orders"
+-- |       # joinUsing InnerJoin "profiles" [ "user_id" ]
+-- |     -- SELECT * FROM "orders" JOIN "profiles" USING ("user_id")
+-- |
+-- | The names are identifiers, so they are quoted rather than bound as
+-- | parameters.
+-- |
+-- | An empty list falls back to `ON (TRUE)`: `USING ()` is not something
+-- | PostgreSQL parses, and an empty list arises naturally when the columns are
+-- | driven by user input. That is the same join a condition of `and []` gives,
+-- | which is what an empty list of requirements means.
+joinUsing :: JoinType -> String -> Array String -> Query -> Query
+joinUsing type_ table [] = joinOn type_ (rel table) (And [])
+joinUsing type_ table columns = joinRel (rel table) (Using type_ columns)
+
+-- | `NATURAL LEFT JOIN` and its kin — matches on every column the two
+-- | relations share, whichever those turn out to be.
+-- |
+-- |     select' [ star ] # from "users" # naturalJoin LeftJoin "departments"
+-- |     -- SELECT * FROM "users" NATURAL LEFT JOIN "departments"
+-- |
+-- | What it joins on therefore depends on the schema rather than on the query,
+-- | and a column added to either relation silently changes the result. `USING`
+-- | says the same thing explicitly.
+naturalJoin :: JoinType -> String -> Query -> Query
+naturalJoin type_ table = joinRel (rel table) (Natural type_)
 
 innerJoin :: String -> Expr -> Query -> Query
 innerJoin table = joinOn InnerJoin (rel table)
