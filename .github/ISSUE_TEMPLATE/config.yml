@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Question or idea
+    url: https://github.com/plooney81/purescript-sqld/discussions
+    about: Usage questions and open-ended design discussion belong in Discussions.
+  - name: Report a security vulnerability
+    url: https://github.com/plooney81/purescript-sqld/security/advisories/new
+    about: Please report injection or quoting-escape issues privately, not as a public issue.

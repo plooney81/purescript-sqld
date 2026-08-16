@@ -472,6 +472,15 @@ new tag then fails the coverage assertion until a corpus entry exists.
 Every table and column the corpus references must exist in
 `test/fixtures/schema.sql`.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the development loop, the corpus
+coverage rule a new feature has to satisfy, and the commit conventions.
+Participation is covered by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+To report a suspected injection or quoting-escape issue, follow
+[SECURITY.md](SECURITY.md) rather than opening a public issue.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
