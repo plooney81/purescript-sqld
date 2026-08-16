@@ -1,0 +1,47 @@
+name: Feature request
+description: A SQL construct sqld cannot build, or a builder that should exist
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        `sqld` is PostgreSQL-only and currently SELECT-only, on purpose. Requests
+        for other dialects will likely be declined; other statement types are
+        open for discussion.
+
+  - type: textarea
+    id: sql
+    attributes:
+      label: The SQL you want to produce
+      render: sql
+      placeholder: |
+        SELECT "id", lag("total") OVER (PARTITION BY "user_id" ORDER BY "day")
+        FROM "orders"
+    validations:
+      required: true
+
+  - type: textarea
+    id: api
+    attributes:
+      label: How you imagine building it
+      description: >
+        A sketch of the builder API. Rough is fine — the shape matters more than
+        the names. Remember every builder is `Query -> Query`.
+      render: purescript
+
+  - type: dropdown
+    id: workaround
+    attributes:
+      label: Can you get there with `raw` today?
+      options:
+        - "Yes, but it is awkward enough to want a builder"
+        - "Yes, and it is fine — filing this for completeness"
+        - "No — `raw` cannot express it"
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Links to the PostgreSQL docs for the construct, prior art in HoneySQL, etc.
