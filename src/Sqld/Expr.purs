@@ -240,15 +240,15 @@ upper e = App "UPPER" [ e ]
 -- | Evaluates an aggregate or window function over a window rather than over
 -- | the whole group:
 -- |
--- |     rowNumber `over` emptyWindow
--- |       { partitionBy = [ col "department" ]
--- |       , orderBy     = [ desc (col "age") ]
--- |       }
+-- |     rowNumber `over`
+-- |       ( partitionBy' [ col "department" ]
+-- |           # orderWindow [ desc (col "age") ]
+-- |       )
 -- |     -- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
 -- |
--- | `emptyWindow` comes from `Sqld.Core`, alongside `emptyQuery`; build a
--- | window from it by record update. Every field is optional, and an empty
--- | window emits `OVER ()`.
+-- | The window builders below start from `partitionBy'` or `orderWindow'` and
+-- | pipe on with `#`, the way a query is built. Every field is optional, and
+-- | `` e `over` emptyWindow `` is `OVER ()`.
 -- |
 -- | PostgreSQL allows a window function in `SELECT` and `ORDER BY` only, and
 -- | rejects one in `WHERE`, `GROUP BY` or `HAVING`. That is not expressed in the
@@ -257,32 +257,23 @@ upper e = App "UPPER" [ e ]
 over :: Expr -> Window -> Expr
 over = Over
 
--- | `over` starting from `emptyWindow`, so a one-off window need not name it —
--- | the same shorthand `select'` is for `emptyQuery`:
--- |
--- |     rowNumber `over'`
--- |       ( partitionBy [ col "department" ]
--- |           >>> orderWindow [ desc (col "age") ]
--- |       )
--- |     -- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
--- |
--- | The second argument is any `Window -> Window`, so window builders compose
--- | with `>>>` the way query fragments do. Reach for `over` with a named
--- | `Window` when several columns share one, and for `` e `over` emptyWindow ``
--- | to say `OVER ()`.
-over' :: Expr -> (Window -> Window) -> Expr
-over' e f = Over e (f emptyWindow)
-
 -- ---------------------------------------------------------------------------
 -- Window builders
 -- ---------------------------------------------------------------------------
 --
--- Plain `Window -> Window` functions, so they compose with `>>>` into `over'`
--- or pipe onto a named window with `#`, exactly as the `Sqld.Select` builders
--- do. Each replaces its field rather than appending to it.
+-- Plain `Window -> Window` functions that pipe together with `#`, exactly as
+-- the `Sqld.Select` builders do, starting from `partitionBy'`, `orderWindow'`
+-- or `emptyWindow`. Each replaces its field rather than appending to it.
 
 partitionBy :: Array Expr -> Window -> Window
 partitionBy exprs w = w { partitionBy = exprs }
+
+-- | Starts a window from its partition, so the common case need not name
+-- | `emptyWindow` — the same shorthand `select'` is for `emptyQuery`:
+-- |
+-- |     partitionBy' [ col "user_id" ] # orderWindow [ asc (col "placed_at") ]
+partitionBy' :: Array Expr -> Window
+partitionBy' exprs = partitionBy exprs emptyWindow
 
 -- | A window's `ORDER BY`, which decides both the order rows are numbered in
 -- | and, for a `RANGE` or `GROUPS` frame, which rows count as peers.
@@ -292,6 +283,17 @@ partitionBy exprs w = w { partitionBy = exprs }
 -- | module importing both unqualified.
 orderWindow :: Array OrderExpr -> Window -> Window
 orderWindow orders w = w { orderBy = orders }
+
+-- | Starts a window from its ordering, the counterpart to `partitionBy'` for a
+-- | window with no partition — which is what a frame usually wants:
+-- |
+-- |     orderWindow' [ asc (col "placed_at") ] # withFrame (rows unboundedPreceding currentRow)
+-- |
+-- | There is deliberately no `withFrame'`: a frame over unordered rows frames
+-- | nothing in particular, and `RANGE` and `GROUPS` mode PostgreSQL rejects
+-- | outright without an `ORDER BY`.
+orderWindow' :: Array OrderExpr -> Window
+orderWindow' orders = orderWindow orders emptyWindow
 
 -- | Sets the frame, taking the `Frame` rather than a `Maybe Frame`: a window
 -- | either has one or is left alone.

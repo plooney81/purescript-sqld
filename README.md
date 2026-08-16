@@ -199,24 +199,23 @@ Common aggregates and functions are provided as one-line wrappers over `app`:
 them the way `groupBy` does:
 
 ```purescript
-rowNumber `over'`
-  ( partitionBy [col "department"]
-      >>> orderWindow [desc (col "age")]
+rowNumber `over`
+  ( partitionBy' [col "department"]
+      # orderWindow [desc (col "age")]
   )
 -- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
 ```
 
-A window is built the way a query is. `partitionBy`, `orderWindow` and
-`withFrame` are plain `Window -> Window` functions, so they compose with `>>>`
-and pipe with `#`; `over'` applies them to `emptyWindow`, the way `select'`
-starts a query from `emptyQuery`. Every field is optional, and an empty window
-emits `OVER ()`, which is valid SQL.
+A window is built the way a query is. `partitionBy'` and `orderWindow'` start
+one, as `select'` starts a query, and `partitionBy`, `orderWindow` and
+`withFrame` pipe onto it with `#`. Every field is optional, and
+``e `over` emptyWindow`` emits `OVER ()`, which is valid SQL.
 
 Windows are values, so name one that several columns share and add to it:
 
 ```purescript
 byUser :: Window
-byUser = emptyWindow # partitionBy [col "user_id"] # orderWindow [asc (col "placed_at")]
+byUser = partitionBy' [col "user_id"] # orderWindow [asc (col "placed_at")]
 
 sum_ (col "total") `over` (byUser # withFrame (rows unboundedPreceding currentRow))
 -- SUM("total") OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC
@@ -226,9 +225,9 @@ sum_ (col "total") `over` (byUser # withFrame (rows unboundedPreceding currentRo
 | Constructor | Example | SQL |
 |---|---|---|
 | `over :: Expr -> Window -> Expr` | ``countStar `over` emptyWindow`` | `COUNT(*) OVER ()` |
-| `over' :: Expr -> (Window -> Window) -> Expr` | ``rank `over'` partitionBy [col "d"]`` | `RANK() OVER (PARTITION BY "d")` |
-| `partitionBy :: Array Expr -> Window -> Window` | `partitionBy [col "department"]` | `PARTITION BY "department"` |
-| `orderWindow :: Array OrderExpr -> Window -> Window` | `orderWindow [desc (col "age")]` | `ORDER BY "age" DESC` |
+| `partitionBy' :: Array Expr -> Window` | `partitionBy' [col "department"]` | `PARTITION BY "department"` |
+| `orderWindow' :: Array OrderExpr -> Window` | `orderWindow' [desc (col "age")]` | `ORDER BY "age" DESC` |
+| `partitionBy` / `orderWindow` | `byUser # orderWindow [asc (col "placed_at")]` | adds to an existing window |
 | `withFrame :: Frame -> Window -> Window` | `withFrame (rows unboundedPreceding currentRow)` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` |
 | `rowNumber` / `rank` / `denseRank` | `rank` | `RANK()` |
 | `lag` / `lead :: Expr -> Int -> Expr` | `lag (col "total") 1` | `LAG("total", $1)` |
@@ -240,9 +239,11 @@ sum_ (col "total") `over` (byUser # withFrame (rows unboundedPreceding currentRo
 
 `orderWindow` is the one name that does not match its SQL keyword: `orderBy`
 already belongs to `Sqld.Select`, and a second one here would collide in any
-module importing both. `Window` is an ordinary record (`partitionBy`,
-`orderBy`, `frame`), so record update reaches the fields directly if you prefer
-it — the builders are setters over exactly those three.
+module importing both. There is no `withFrame'`, because a frame over unordered
+rows frames nothing in particular — and in `RANGE` or `GROUPS` mode PostgreSQL
+rejects one outright. `Window` is an ordinary record (`partitionBy`, `orderBy`,
+`frame`), so record update reaches the fields directly if you prefer it; the
+builders are setters over exactly those three.
 
 Frame offsets are emitted literally rather than as parameters, so a frame
 carries no bindings; a window's `PARTITION BY` and `ORDER BY` expressions do,

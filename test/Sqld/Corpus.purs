@@ -27,15 +27,15 @@ import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
 import Sqld.Core (Cte(..), Expr(..), Frame, FrameBound(..), FrameMode(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, over, over', partitionBy, preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
--- | A window shared by more than one corpus entry, so `over` with a named
--- | `Window` is exercised alongside the `over'` shorthand.
+-- | A window shared by more than one corpus entry, so a named `Window` is
+-- | exercised alongside the ones built inline.
 byUser :: Window
-byUser = emptyWindow # partitionBy [ col "user_id" ] # orderWindow [ asc (col "placed_at") ]
+byUser = partitionBy' [ col "user_id" ] # orderWindow [ asc (col "placed_at") ]
 
 -- ---------------------------------------------------------------------------
 -- The corpus
@@ -725,9 +725,9 @@ handWritten =
     , query: select'
         ( cols [ "name", "department" ] <>
             [ as
-                ( rowNumber `over'`
-                    ( partitionBy [ col "department" ]
-                        >>> orderWindow [ desc (col "age") ]
+                ( rowNumber `over`
+                    ( partitionBy' [ col "department" ]
+                        # orderWindow [ desc (col "age") ]
                     )
                 )
                 "rn"
@@ -745,8 +745,8 @@ handWritten =
   , { name: "window-rank-dense-rank"
     , query: select'
         ( cols [ "name" ] <>
-            [ as (rank `over'` orderWindow [ desc (col "score") ]) "rank"
-            , as (denseRank `over'` orderWindow [ desc (col "score") ]) "dense_rank"
+            [ as (rank `over` orderWindow' [ desc (col "score") ]) "rank"
+            , as (denseRank `over` orderWindow' [ desc (col "score") ]) "dense_rank"
             ]
         )
         # from "users"
@@ -782,9 +782,9 @@ handWritten =
   , { name: "window-frame-rows-offsets"
     , query: select'
         [ as
-            ( avg (col "total") `over'`
-                ( orderWindow [ asc (col "placed_at") ]
-                    >>> withFrame (rows (preceding 3) (following 1))
+            ( avg (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (rows (preceding 3) (following 1))
                 )
             )
             "moving_average"
@@ -795,9 +795,9 @@ handWritten =
   , { name: "window-frame-range"
     , query: select'
         [ as
-            ( sum_ (col "total") `over'`
-                ( orderWindow [ asc (col "placed_at") ]
-                    >>> withFrame (range currentRow unboundedFollowing)
+            ( sum_ (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (range currentRow unboundedFollowing)
                 )
             )
             "remaining_total"
@@ -810,9 +810,9 @@ handWritten =
   , { name: "window-frame-groups"
     , query: select'
         [ as
-            ( sum_ (col "total") `over'`
-                ( orderWindow [ asc (col "placed_at") ]
-                    >>> withFrame (groups unboundedPreceding currentRow)
+            ( sum_ (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (groups unboundedPreceding currentRow)
                 )
             )
             "total_to_date"
@@ -824,9 +824,9 @@ handWritten =
   , { name: "window-frame-one-bound"
     , query: select'
         [ as
-            ( sum_ (col "total") `over'`
-                ( orderWindow [ asc (col "placed_at") ]
-                    >>> withFrame (frameFrom Rows unboundedPreceding)
+            ( sum_ (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (frameFrom Rows unboundedPreceding)
                 )
             )
             "running_total"
@@ -838,7 +838,7 @@ handWritten =
   , { name: "window-in-order-by"
     , query: select' (cols [ "name" ])
         # from "users"
-        # orderBy [ asc (rank `over'` orderWindow [ desc (col "score") ]) ]
+        # orderBy [ asc (rank `over` orderWindow' [ desc (col "score") ]) ]
     }
 
   -- A window's parameters sit in the select list, so they are numbered before
@@ -846,8 +846,7 @@ handWritten =
   , { name: "window-parameter-ordering"
     , query: select'
         [ as
-            ( countStar `over'`
-                partitionBy [ coalesce [ col "department", str "unknown" ] ]
+            ( countStar `over` partitionBy' [ coalesce [ col "department", str "unknown" ] ]
             )
             "headcount"
         ]
