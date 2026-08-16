@@ -3,6 +3,14 @@ module Sqld.Core where
 import Prelude
 import Data.Maybe (Maybe(..))
 
+-- | The fixed SQL keyword a value renders as.
+-- |
+-- | Only for the AST's leaves: a keyword depends on nothing but the value —
+-- | no layout, no bindings, and no dependence on where it appears. Anything
+-- | whose rendering varies with context belongs in `Sqld.Format`.
+class Keyword a where
+  keyword :: a -> String
+
 type ColumnRef = { table :: Maybe String, column :: String }
 
 -- | Anything that can appear in `FROM` or as a join target.
@@ -79,6 +87,12 @@ data JoinType
   | RightJoin
   | FullJoin
 
+instance Keyword JoinType where
+  keyword InnerJoin = "JOIN"
+  keyword LeftJoin  = "LEFT JOIN"
+  keyword RightJoin = "RIGHT JOIN"
+  keyword FullJoin  = "FULL JOIN"
+
 type Join =
   { type_     :: JoinType
   , relation  :: Relation
@@ -86,6 +100,10 @@ type Join =
   }
 
 data OrderDir = Asc | Desc
+
+instance Keyword OrderDir where
+  keyword Asc  = "ASC"
+  keyword Desc = "DESC"
 
 type OrderExpr = { expr :: Expr, dir :: OrderDir }
 
@@ -114,6 +132,11 @@ data FrameMode
   | Range
   | Groups
 
+instance Keyword FrameMode where
+  keyword Rows   = "ROWS"
+  keyword Range  = "RANGE"
+  keyword Groups = "GROUPS"
+
 -- | One end of a frame.
 -- |
 -- | The offsets are emitted literally rather than as parameters, which keeps a
@@ -126,6 +149,15 @@ data FrameBound
   | CurrentRow
   | Following Int
   | UnboundedFollowing
+
+-- | Not a pure lookup — `Preceding` and `Following` carry an offset — but the
+-- | result still depends on nothing but the value.
+instance Keyword FrameBound where
+  keyword UnboundedPreceding = "UNBOUNDED PRECEDING"
+  keyword (Preceding n)      = show n <> " PRECEDING"
+  keyword CurrentRow         = "CURRENT ROW"
+  keyword (Following n)      = show n <> " FOLLOWING"
+  keyword UnboundedFollowing = "UNBOUNDED FOLLOWING"
 
 -- | Which rows of the partition a window function sees:
 -- | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`, and its kin.
@@ -168,6 +200,11 @@ data SetOp
   | Except
 
 derive instance Eq SetOp
+
+instance Keyword SetOp where
+  keyword Union     = "UNION"
+  keyword Intersect = "INTERSECT"
+  keyword Except    = "EXCEPT"
 
 -- | Two result sets combined: `left UNION right`, and so on.
 -- |
