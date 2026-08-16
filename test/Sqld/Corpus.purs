@@ -28,7 +28,7 @@ import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
 import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), Join, JoinCondition(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, joinRel, joinUsing, lateral, leftJoinAs, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -576,11 +576,21 @@ handWritten =
   , { name: "join-lateral"
     , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
         # fromAs "users" "u"
-        # joinOn InnerJoin (lateral recentOrdersOfUser "recent") (and [])
+        # joinLateral recentOrdersOfUser "recent"
     }
 
-  -- CROSS JOIN LATERAL says the same thing without the ON clause, and is how
-  -- the comma form of a lateral join is spelled here.
+  -- The outer form keeps a user whose subquery finds nothing, which the inner
+  -- one drops. RIGHT and FULL have no lateral form at all — PostgreSQL rejects
+  -- a lateral reference from the right operand of either — so these two
+  -- builders are the whole of it.
+  , { name: "left-join-lateral"
+    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+        # fromAs "users" "u"
+        # leftJoinLateral recentOrdersOfUser "recent"
+    }
+
+  -- CROSS JOIN LATERAL says the same thing as `joinLateral` without the ON
+  -- clause, and is how the comma form of a lateral join is spelled here.
   , { name: "cross-join-lateral"
     , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
         # fromAs "users" "u"

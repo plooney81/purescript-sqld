@@ -355,17 +355,29 @@ selectSpec = describe "Sqld.Select" do
 
   describe "lateral subqueries" do
     -- The subquery references "u"."id", which only LATERAL makes legal.
-    it "JOIN LATERAL … ON (TRUE)" do
+    it "joinLateral joins ON (TRUE)" do
       let recent = select' (cols ["total"])
             # from "orders"
             # where_ (tcol "orders" "user_id" .== tcol "u" "id")
             # limit 3
           query = select' [expr (tcol "recent" "total")]
             # fromAs "users" "u"
-            # joinOn InnerJoin (lateral recent "recent") (and [])
+            # joinLateral recent "recent"
             # formatInline
       query `shouldEqual`
         "SELECT \"recent\".\"total\" FROM \"users\" AS \"u\" JOIN LATERAL (SELECT \"total\" FROM \"orders\" WHERE \"orders\".\"user_id\" = \"u\".\"id\" LIMIT 3) AS \"recent\" ON (TRUE)"
+
+    -- The outer form, which keeps a left row whose subquery found nothing.
+    it "leftJoinLateral" do
+      let recent = select' (cols ["total"])
+            # from "orders"
+            # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+          query = select' [expr (tcol "recent" "total")]
+            # fromAs "users" "u"
+            # leftJoinLateral recent "recent"
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"recent\".\"total\" FROM \"users\" AS \"u\" LEFT JOIN LATERAL (SELECT \"total\" FROM \"orders\" WHERE \"orders\".\"user_id\" = \"u\".\"id\") AS \"recent\" ON (TRUE)"
 
     -- ON TRUE is never supplied implicitly: a lateral join takes whatever
     -- condition it is given, including a real one.

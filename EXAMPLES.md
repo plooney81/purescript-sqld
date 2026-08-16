@@ -700,27 +700,25 @@ beside it. `lateral` lifts that restriction, and with it the per-row shape:
 the three most recent orders of *each* user, in one join rather than one
 correlated subquery per column.
 
-A lateral join has nothing to match on beyond the correlation itself, so it
-is joined `ON TRUE` — which is what `and []` emits. Nothing supplies it
-implicitly: `joinOn` with a real condition, or `joinRel … Cross` for
-`CROSS JOIN LATERAL`, work just as well.
+The correlation inside the subquery is the whole of the matching, so a
+lateral join has nothing left to say in a condition and `joinLateral` joins
+`ON TRUE`. Use `leftJoinLateral` to keep users whose subquery finds nothing;
+those are the only two kinds, because PostgreSQL rejects a lateral reference
+from the right operand of a `RIGHT` or `FULL` join.
 
 ```purescript
 lateralJoin :: Query
 lateralJoin =
   select' (cols [ "u.name", "recent.total" ])
     # fromAs "users" "u"
-    # joinOn InnerJoin
-        ( lateral
-            ( select' (cols [ "total" ])
-                # from "orders"
-                # where_ (col "orders.user_id" .== col "u.id")
-                # orderBy [ desc (col "placed_at") ]
-                # limit 3
-            )
-            "recent"
+    # joinLateral
+        ( select' (cols [ "total" ])
+            # from "orders"
+            # where_ (col "orders.user_id" .== col "u.id")
+            # orderBy [ desc (col "placed_at") ]
+            # limit 3
         )
-        (and [])
+        "recent"
 ```
 
 ```sql

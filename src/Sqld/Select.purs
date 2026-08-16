@@ -22,27 +22,17 @@ derived :: Query -> String -> Relation
 derived = Derived
 
 -- | A derived table marked `LATERAL`, which may reference columns of the
--- | relations to its left. An ordinary derived table may not, which is why the
--- | per-row shape — the top three orders of each user — needs this one:
+-- | relations to its left. An ordinary derived table may not, which is what
+-- | makes the per-row shape — the top three orders of each user — need this
+-- | one.
 -- |
--- |     select' (cols [ "u.name", "recent.total" ])
--- |       # fromAs "users" "u"
--- |       # joinOn InnerJoin
--- |           ( lateral
--- |               ( select' (cols [ "total" ])
--- |                   # from "orders"
--- |                   # where_ (col "orders.user_id" .== col "u.id")
--- |                   # orderBy [ desc (col "placed_at") ]
--- |                   # limit 3
--- |               )
--- |               "recent"
--- |           )
--- |           (and [])
+-- | This is the relation on its own. `joinLateral` and `leftJoinLateral` are
+-- | the builders that join it, and cover the shape almost every lateral join
+-- | takes; reach for this with `joinOn` or `joinRel` for the rest — a lateral
+-- | join carrying a real `ON` condition, or the `CROSS JOIN LATERAL` spelling:
 -- |
--- | A lateral join has nothing to match on beyond the correlation itself, so it
--- | is usually joined `ON TRUE` — `and []`, as above, or a `Cross` condition
--- | for `CROSS JOIN LATERAL`. Neither is supplied implicitly: a lateral join
--- | with a real `ON` condition is a legal query too.
+-- |     emptyQuery # joinRel (lateral recent "recent") Cross
+-- |     -- CROSS JOIN LATERAL (…) AS "recent"
 -- |
 -- | Which relations count as "to its left" is the order the joins were added
 -- | in, and PostgreSQL rejects a reference to any other — a rule it enforces
@@ -268,6 +258,42 @@ joinUsing type_ table columns = joinRel (rel table) (Using type_ columns)
 -- | says the same thing explicitly.
 naturalJoin :: JoinType -> String -> Query -> Query
 naturalJoin type_ table = joinRel (rel table) (Natural type_)
+
+-- | `JOIN LATERAL (SELECT …) AS alias ON (TRUE)` — a per-row subquery that may
+-- | reference the relations to its left:
+-- |
+-- |     select' (cols [ "u.name", "recent.total" ])
+-- |       # fromAs "users" "u"
+-- |       # joinLateral
+-- |           ( select' (cols [ "total" ])
+-- |               # from "orders"
+-- |               # where_ (col "orders.user_id" .== col "u.id")
+-- |               # orderBy [ desc (col "placed_at") ]
+-- |               # limit 3
+-- |           )
+-- |           "recent"
+-- |
+-- | The correlation inside the subquery is the whole of the matching, so there
+-- | is nothing left for a condition to say and this joins `ON (TRUE)`. That is
+-- | the same join `CROSS JOIN LATERAL` gives, spelled the way the rest of these
+-- | builders spell an inner join. Reach for `joinOn` with `lateral` for the
+-- | rarer lateral join that does carry a condition of its own.
+-- |
+-- | It takes no `JoinType`, and neither does `leftJoinLateral`, because those
+-- | two are the only kinds there are: PostgreSQL rejects a lateral reference
+-- | from the right operand of a `RIGHT` or `FULL` join (`42P10`), so a
+-- | `JoinType` here would be three valid spellings and two that never run.
+joinLateral :: Query -> String -> Query -> Query
+joinLateral sub alias = joinOn InnerJoin (lateral sub alias) (And [])
+
+-- | `LEFT JOIN LATERAL (SELECT …) AS alias ON (TRUE)`.
+-- |
+-- | The difference from `joinLateral` is what happens when the subquery finds
+-- | nothing: an inner lateral join drops the row it was pairing with, and this
+-- | one keeps it with nulls. Users with no orders survive their top-three-orders
+-- | join here and vanish from it there.
+leftJoinLateral :: Query -> String -> Query -> Query
+leftJoinLateral sub alias = joinOn LeftJoin (lateral sub alias) (And [])
 
 innerJoin :: String -> Expr -> Query -> Query
 innerJoin table = joinOn InnerJoin (rel table)

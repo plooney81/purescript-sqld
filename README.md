@@ -102,7 +102,9 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `joinUsing :: JoinType -> String -> Array String -> Query -> Query` | `JOIN … USING ("a", "b")` — match on shared column names |
 | `naturalJoin :: JoinType -> String -> Query -> Query` | `NATURAL <kind> JOIN` — match on every shared column |
 | `joinRel :: Relation -> JoinCondition -> Query -> Query` | Most general form; any relation, any join condition |
-| `lateral :: Query -> String -> Relation` | A `LATERAL` derived table, for `joinOn` or `joinRel` |
+| `joinLateral :: Query -> String -> Query -> Query` | `JOIN LATERAL (…) AS alias ON (TRUE)` — a per-row subquery |
+| `leftJoinLateral :: Query -> String -> Query -> Query` | As above, keeping left rows whose subquery found nothing |
+| `lateral :: Query -> String -> Relation` | The `LATERAL` relation on its own, for `joinOn` or `joinRel` |
 | `union` / `unionAll` | `:: Query -> Query -> Query` — the rows of both, duplicates removed / kept |
 | `intersect` / `intersectAll` | `:: Query -> Query -> Query` — the rows in both |
 | `except` / `exceptAll` | `:: Query -> Query -> Query` — the left query's rows, minus the right's |
@@ -364,33 +366,41 @@ select' [star]
 ### Lateral joins
 
 A derived table is evaluated on its own, so it cannot reference the relations
-beside it. `lateral` marks one `LATERAL`, which is what lifts that restriction
-— and with it, the per-row shape: the three most recent orders of *each* user,
-in one join rather than a correlated subquery per column.
+beside it. `LATERAL` lifts that restriction, and with it comes the per-row
+shape: the three most recent orders of *each* user, in one join rather than a
+correlated subquery per column.
 
 ```purescript
 select' (cols ["u.name", "recent.total"])
   # fromAs "users" "u"
-  # joinOn InnerJoin
-      ( lateral
-          ( select' (cols ["total"])
-              # from "orders"
-              # where_ (col "orders.user_id" .== col "u.id")
-              # orderBy [desc (col "placed_at")]
-              # limit 3
-          )
-          "recent"
+  # joinLateral
+      ( select' (cols ["total"])
+          # from "orders"
+          # where_ (col "orders.user_id" .== col "u.id")
+          # orderBy [desc (col "placed_at")]
+          # limit 3
       )
-      (and [])
+      "recent"
 -- SELECT "u"."name", "recent"."total" FROM "users" AS "u"
 --   JOIN LATERAL (SELECT "total" FROM "orders" WHERE "orders"."user_id" = "u"."id"
 --     ORDER BY "placed_at" DESC LIMIT 3) AS "recent" ON (TRUE)
 ```
 
-A lateral join has nothing to match on beyond the correlation inside it, so it
-is usually joined `ON TRUE` — which is what `and []` emits. Nothing supplies
-that implicitly: `joinOn` with a real condition is a legal lateral join too,
-and `joinRel … Cross` gives `CROSS JOIN LATERAL`.
+The correlation inside the subquery is the whole of the matching, so there is
+nothing left for a condition to say and `joinLateral` joins `ON (TRUE)`.
+`leftJoinLateral` is the outer form, and the difference is what happens when
+the subquery finds nothing: the inner one drops the row it was pairing with,
+the outer keeps it with nulls — users who have never ordered survive the join
+above only under `leftJoinLateral`.
+
+Those two are the whole of it, which is why neither takes a `JoinType`.
+PostgreSQL rejects a lateral reference from the right operand of a `RIGHT` or
+`FULL` join (`42P10`), so a join kind here would be two spellings that work and
+two that never run.
+
+For the rest, `lateral` gives the relation on its own: `joinOn` for the rarer
+lateral join that does carry a condition, `joinRel … Cross` for the
+`CROSS JOIN LATERAL` spelling, which is the same join `joinLateral` gives.
 
 Which relations a lateral one may reference are those to its left, meaning the
 order the joins were added in. PostgreSQL rejects a reference to any other, and
