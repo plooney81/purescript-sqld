@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, Join, Literal(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
+import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, Join, JoinCondition(..), Literal(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -244,14 +244,35 @@ formatJoins layout joins state = Tuple (intercalate (clauseSep layout) parts) s'
   Tuple parts s' = mapAccum (formatJoin layout) state joins
 
 formatJoin :: Layout -> Join -> WithBindings String
-formatJoin layout j state = Tuple (kw <> " " <> relSql <> " ON (" <> onSql <> ")") s2
+formatJoin layout j state = Tuple (joinKeyword j.condition <> " " <> relSql <> conditionSql) s2
   where
-  kw = keyword j.type_
-
   -- Relation before condition: a derived join target's parameters appear
   -- earlier in the SQL than the ON clause's.
-  Tuple relSql s1 = formatRelation layout j.relation state
-  Tuple onSql  s2 = formatExpr layout j.on s1
+  Tuple relSql       s1 = formatRelation layout j.relation state
+  Tuple conditionSql s2 = formatJoinCondition layout j.condition s1
+
+-- | The keyword a join leads with. Not a `Keyword` instance: `NATURAL` sits in
+-- | front of the join type rather than replacing it, so the string comes from
+-- | two values rather than one.
+joinKeyword :: JoinCondition -> String
+joinKeyword (On type_ _)    = keyword type_
+joinKeyword (Using type_ _) = keyword type_
+joinKeyword (Natural type_) = "NATURAL " <> keyword type_
+joinKeyword Cross           = "CROSS JOIN"
+
+-- | What follows the join target: an `ON` or `USING` clause, or nothing at all
+-- | — `NATURAL` and `CROSS` have said everything in the keyword.
+-- |
+-- | Only `ON` carries parameters. `USING` names columns, which are identifiers
+-- | and so are quoted rather than bound.
+formatJoinCondition :: Layout -> JoinCondition -> WithBindings String
+formatJoinCondition layout (On _ e) state = Tuple (" ON (" <> sql <> ")") s'
+  where
+  Tuple sql s' = formatExpr layout e state
+formatJoinCondition _ (Using _ columns) state =
+  Tuple (" USING (" <> intercalate ", " (map quoteIdent columns) <> ")") state
+formatJoinCondition _ (Natural _) state = Tuple mempty state
+formatJoinCondition _ Cross       state = Tuple mempty state
 
 formatWhere :: Layout -> Maybe Expr -> WithBindings String
 formatWhere _ Nothing       state = Tuple mempty state

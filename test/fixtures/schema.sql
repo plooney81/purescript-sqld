@@ -38,6 +38,15 @@ CREATE TABLE orders
   , placed_at timestamptz NOT NULL DEFAULT now()
   );
 
+-- `department` deliberately carries the same name as `users.department`, and is
+-- the only column the two tables share: that is what `NATURAL JOIN` and
+-- `USING ("department")` find. Renaming it changes what those queries mean.
+CREATE TABLE departments
+  ( department text PRIMARY KEY
+  , building   text
+  , budget     numeric
+  );
+
 CREATE TABLE articles
   ( id           integer PRIMARY KEY
   , title        text NOT NULL

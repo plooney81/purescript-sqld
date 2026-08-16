@@ -23,6 +23,9 @@ Regenerate with `make examples`.
 - [Joins](#joins)
 - [Right joins](#right-joins)
 - [Full joins](#full-joins)
+- [Cross joins](#cross-joins)
+- [Joining on shared column names](#joining-on-shared-column-names)
+- [Natural joins](#natural-joins)
 - [Aggregation](#aggregation)
 - [Window functions](#window-functions)
 - [DISTINCT](#distinct)
@@ -227,6 +230,78 @@ FULL JOIN "profiles" AS "p" ON ("u"."id" = "p"."user_id")
 ```
 
 <sub>Parameterised: <code>SELECT "u"."name", "p"."bio" FROM "users" AS "u" FULL JOIN "profiles" AS "p" ON ("u"."id" = "p"."user_id")</code></sub>
+
+---
+
+## Cross joins
+
+Every row of one relation against every row of the other. `crossJoin` takes
+no condition, and the AST has none to give it: `CROSS JOIN … ON (…)` is not
+SQL, so it is not a query this library can build.
+
+```purescript
+crossJoinExample :: Query
+crossJoinExample =
+  select' (cols [ "users.name", "departments.building" ])
+    # from "users"
+    # crossJoin "departments"
+```
+
+```sql
+SELECT "users"."name", "departments"."building"
+FROM "users"
+CROSS JOIN "departments"
+```
+
+<sub>Parameterised: <code>SELECT "users"."name", "departments"."building" FROM "users" CROSS JOIN "departments"</code></sub>
+
+---
+
+## Joining on shared column names
+
+`USING` matches columns of the same name in both relations and collapses
+each pair into one output column — which is why `"user_id"` below is
+unambiguous, where the equivalent `ON` would leave two of it.
+
+```purescript
+joinUsingExample :: Query
+joinUsingExample =
+  select' (cols [ "user_id", "status", "bio" ])
+    # from "orders"
+    # joinUsing InnerJoin "profiles" [ "user_id" ]
+```
+
+```sql
+SELECT "user_id", "status", "bio"
+FROM "orders"
+JOIN "profiles" USING ("user_id")
+```
+
+<sub>Parameterised: <code>SELECT "user_id", "status", "bio" FROM "orders" JOIN "profiles" USING ("user_id")</code></sub>
+
+---
+
+## Natural joins
+
+`NATURAL` is `USING` with the column list left to the schema: it matches on
+every name the two relations share. Convenient, and worth weighing against
+the fact that a column added to either table silently changes the result.
+
+```purescript
+naturalJoinExample :: Query
+naturalJoinExample =
+  select' (cols [ "name", "building" ])
+    # from "users"
+    # naturalJoin LeftJoin "departments"
+```
+
+```sql
+SELECT "name", "building"
+FROM "users"
+NATURAL LEFT JOIN "departments"
+```
+
+<sub>Parameterised: <code>SELECT "name", "building" FROM "users" NATURAL LEFT JOIN "departments"</code></sub>
 
 ---
 

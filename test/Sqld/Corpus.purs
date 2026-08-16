@@ -26,9 +26,9 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), Join, JoinCondition(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, joinRel, joinUsing, leftJoinAs, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -36,6 +36,12 @@ type CorpusEntry = { name :: String, query :: Query }
 -- | exercised alongside the ones built inline.
 byUser :: Window
 byUser = partitionBy' [ col "user_id" ] # orderWindow [ asc (col "placed_at") ]
+
+-- | A parameterised subquery, for the entries that join a derived table and
+-- | care where its bindings are numbered.
+paidOrders :: Query
+paidOrders =
+  select' (cols [ "user_id" ]) # from "orders" # where_ (col "status" .== str "paid")
 
 -- ---------------------------------------------------------------------------
 -- The corpus
@@ -278,6 +284,44 @@ handWritten =
     , query: select' [ star ]
         # fromAs "users" "u"
         # fullJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
+    }
+
+  , { name: "cross-join"
+    , query: select' [ starFrom "users" ]
+        # from "users"
+        # crossJoin "departments"
+    }
+
+  -- A derived join target carries parameters; a CROSS JOIN carries none of its
+  -- own, so the WHERE clause's are numbered after the subquery's.
+  , { name: "cross-join-derived"
+    , query: select' [ star ]
+        # fromAs "users" "u"
+        # joinRel (derived paidOrders "paid") Cross
+        # where_ (tcol "u" "active" .== bool true)
+    }
+
+  -- USING collapses the joined column to one, which is why "user_id" is
+  -- unambiguous in the select list here and would not be under ON.
+  , { name: "join-using"
+    , query: select' (cols [ "user_id" ])
+        # from "orders"
+        # joinUsing InnerJoin "profiles" [ "user_id" ]
+    }
+
+  , { name: "join-using-multiple-columns"
+    , query: select' [ star ]
+        # from "orders"
+        # joinUsing LeftJoin "profiles" [ "id", "user_id" ]
+    }
+
+  -- `users` and `departments` share exactly one column name, `department`,
+  -- which is what NATURAL finds. PostgreSQL rejects a natural join with no
+  -- common column at all, so this entry is also a check on the fixture schema.
+  , { name: "natural-join"
+    , query: select' [ star ]
+        # from "users"
+        # naturalJoin LeftJoin "departments"
     }
 
   -- Grouping -----------------------------------------------------------------
@@ -974,6 +1018,17 @@ joinTypeTag = case _ of
   RightJoin -> "JoinType.RightJoin"
   FullJoin -> "JoinType.FullJoin"
 
+-- | Each join form is tagged apart, so the ratchet holds `ON`, `USING`,
+-- | `NATURAL` and `CROSS` each to a corpus entry of its own. `Cross` carries no
+-- | join type, which is why the type tag comes from the condition rather than
+-- | from the join.
+joinTags :: Join -> Array String
+joinTags j = relationTags "Query.join" j.relation <> case j.condition of
+  On type_ e -> [ "JoinCondition.On", joinTypeTag type_ ] <> exprTags e
+  Using type_ _ -> [ "JoinCondition.Using", joinTypeTag type_ ]
+  Natural type_ -> [ "JoinCondition.Natural", joinTypeTag type_ ]
+  Cross -> [ "JoinCondition.Cross" ]
+
 orderDirTag :: OrderDir -> String
 orderDirTag = case _ of
   Asc -> "OrderDir.Asc"
@@ -1020,7 +1075,7 @@ queryTags q =
           Just d -> distinctTags d)
     <> Array.concatMap selectTags q.select
     <> foldClause "Query.from" (map (relationTags "Query.from") q.from)
-    <> Array.concatMap (\j -> joinTypeTag j.type_ : relationTags "Query.join" j.relation <> exprTags j.on) q.joins
+    <> Array.concatMap joinTags q.joins
     <> foldClause "Query.where" (map exprTags q.where_)
     <> clause "Query.groupBy" (Array.concatMap exprTags q.groupBy) (Array.null q.groupBy)
     <> foldClause "Query.having" (map exprTags q.having)
@@ -1105,6 +1160,10 @@ requiredTags = Array.sort
   , "JoinType.LeftJoin"
   , "JoinType.RightJoin"
   , "JoinType.FullJoin"
+  , "JoinCondition.On"
+  , "JoinCondition.Using"
+  , "JoinCondition.Natural"
+  , "JoinCondition.Cross"
   , "OrderDir.Asc"
   , "OrderDir.Desc"
   , "Query.with"

@@ -1,7 +1,7 @@
 module Test.Sqld.SelectSpec where
 
 import Prelude hiding (not, between)
-import Sqld.Core (JoinType(..), Literal(..), Query, emptyQuery)
+import Sqld.Core (JoinCondition(..), JoinType(..), Literal(..), Query, emptyQuery)
 import Sqld.Expr
 import Sqld.Format (format, formatInline)
 import Sqld.Select
@@ -256,6 +256,68 @@ selectSpec = describe "Sqld.Select" do
             # formatInline
       query `shouldEqual`
         "SELECT * FROM \"users\" AS \"u\" JOIN \"orders\" AS \"o\" ON (\"u\".\"id\" = \"o\".\"user_id\")"
+
+    it "CROSS JOIN" do
+      let query = select' [star]
+            # from "users"
+            # crossJoin "departments"
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" CROSS JOIN \"departments\""
+
+    it "JOIN USING" do
+      let query = select' [star]
+            # from "orders"
+            # joinUsing InnerJoin "profiles" ["user_id"]
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" JOIN \"profiles\" USING (\"user_id\")"
+
+    it "JOIN USING quotes every column name" do
+      let query = select' [star]
+            # from "orders"
+            # joinUsing LeftJoin "profiles" ["id", "user_id"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"orders\" LEFT JOIN \"profiles\" USING (\"id\", \"user_id\")"
+
+    -- `USING ()` is not something PostgreSQL parses, and no columns to match on
+    -- is what `and []` already means.
+    it "JOIN USING with no columns falls back to ON (TRUE)" do
+      let query = select' [star]
+            # from "orders"
+            # joinUsing InnerJoin "profiles" []
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" JOIN \"profiles\" ON (TRUE)"
+
+    it "NATURAL JOIN" do
+      let query = select' [star]
+            # from "users"
+            # naturalJoin InnerJoin "departments"
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" NATURAL JOIN \"departments\""
+
+    it "NATURAL LEFT JOIN puts NATURAL in front of the join type" do
+      let query = select' [star]
+            # from "users"
+            # naturalJoin LeftJoin "departments"
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" NATURAL LEFT JOIN \"departments\""
+
+    it "joins an aliased relation with joinRel" do
+      let query = select' [star]
+            # from "users"
+            # joinRel (relAs "departments" "d") Cross
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" CROSS JOIN \"departments\" AS \"d\""
+
+    it "mixes join forms in one query" do
+      let query = select' [star]
+            # fromAs "users" "u"
+            # joinUsing LeftJoin "profiles" ["user_id"]
+            # crossJoin "departments"
+            # innerJoinAs "orders" "o" (tcol "u" "id" .== tcol "o" "user_id")
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" LEFT JOIN \"profiles\" USING (\"user_id\") CROSS JOIN \"departments\" JOIN \"orders\" AS \"o\" ON (\"u\".\"id\" = \"o\".\"user_id\")"
 
   describe "derived tables" do
     it "subquery in FROM" do

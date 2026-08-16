@@ -2,9 +2,10 @@ module Test.Sqld.FormatSpec where
 
 import Prelude (Unit, discard, (#), (<>))
 import Data.String (trim)
+import Sqld.Core (JoinCondition(..), Literal(..))
 import Sqld.Expr (and, bool, col, countStar, currentRow, exists, inSub, int, null, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, tcol, unboundedPreceding, withFrame, (.==))
-import Sqld.Format (formatInline, formatPretty)
-import Sqld.Select (as, asc, cols, desc, except, expr, from, fromAs, fromSub, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
+import Sqld.Format (format, formatInline, formatPretty)
+import Sqld.Select (as, asc, cols, derived, desc, except, expr, from, fromAs, fromSub, joinRel, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -56,6 +57,22 @@ formatSpec = describe "Sqld.Format" do
             # formatInline
       query `shouldEqual`
         "SELECT * FROM \"orders\" LEFT JOIN \"users\" ON (\"user_id\" = 99) WHERE \"status\" = 'open'"
+
+    -- A CROSS JOIN carries no condition of its own, but its target may be a
+    -- derived table that carries parameters, and those still land where the
+    -- relation does — ahead of the WHERE clause's.
+    it "a cross-joined derived table's values come before WHERE values" do
+      let paid = select' (cols ["user_id"])
+            # from "orders"
+            # where_ (col "status" .== str "paid")
+          result = select' [star]
+            # fromAs "users" "u"
+            # joinRel (derived paid "paid") Cross
+            # where_ (tcol "u" "active" .== bool true)
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" CROSS JOIN (SELECT \"user_id\" FROM \"orders\" WHERE \"status\" = $1) AS \"paid\" WHERE \"u\".\"active\" = $2"
+      result.params `shouldEqual` [LitString "paid", LitBoolean true]
 
   describe "formatPretty" do
     it "clause per line" do
