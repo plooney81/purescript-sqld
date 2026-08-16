@@ -21,6 +21,35 @@ relAs name alias = Table name (Just alias)
 derived :: Query -> String -> Relation
 derived = Derived
 
+-- | A derived table marked `LATERAL`, which may reference columns of the
+-- | relations to its left. An ordinary derived table may not, which is why the
+-- | per-row shape — the top three orders of each user — needs this one:
+-- |
+-- |     select' (cols [ "u.name", "recent.total" ])
+-- |       # fromAs "users" "u"
+-- |       # joinOn InnerJoin
+-- |           ( lateral
+-- |               ( select' (cols [ "total" ])
+-- |                   # from "orders"
+-- |                   # where_ (col "orders.user_id" .== col "u.id")
+-- |                   # orderBy [ desc (col "placed_at") ]
+-- |                   # limit 3
+-- |               )
+-- |               "recent"
+-- |           )
+-- |           (and [])
+-- |
+-- | A lateral join has nothing to match on beyond the correlation itself, so it
+-- | is usually joined `ON TRUE` — `and []`, as above, or a `Cross` condition
+-- | for `CROSS JOIN LATERAL`. Neither is supplied implicitly: a lateral join
+-- | with a real `ON` condition is a legal query too.
+-- |
+-- | Which relations count as "to its left" is the order the joins were added
+-- | in, and PostgreSQL rejects a reference to any other — a rule it enforces
+-- | itself rather than one this type expresses.
+lateral :: Query -> String -> Relation
+lateral = Lateral
+
 -- ---------------------------------------------------------------------------
 -- FROM
 -- ---------------------------------------------------------------------------
@@ -37,6 +66,14 @@ fromAs table alias = fromRel $ relAs table alias
 -- | `FROM (SELECT …) AS alias`.
 fromSub :: Query -> String -> Query -> Query
 fromSub sub alias = fromRel $ derived sub alias
+
+-- | `FROM LATERAL (SELECT …) AS alias`.
+-- |
+-- | Nothing stands to the left of the first `FROM` item, so a lateral one there
+-- | has nothing to reference and means what `fromSub` means. `LATERAL` earns
+-- | its keep on a join target: see `lateral`.
+fromLateral :: Query -> String -> Query -> Query
+fromLateral sub alias = fromRel $ lateral sub alias
 
 -- ---------------------------------------------------------------------------
 -- SELECT / WHERE

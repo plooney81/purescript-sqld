@@ -17,10 +17,16 @@ type ColumnRef = { table :: Maybe String, column :: String }
 -- |
 -- | `Derived` takes its alias as a plain `String` rather than a `Maybe`:
 -- | PostgreSQL rejects a subquery in `FROM` without one, so the type rules out
--- | a query that could never run.
+-- | a query that could never run. `Lateral` is that same subquery marked
+-- | `LATERAL`, which lets it reference columns of the relations to its left.
+-- |
+-- | `Lateral` is a constructor of its own rather than a flag on `Derived`,
+-- | because `Table` has no lateral form: only a subquery can be marked, and a
+-- | flag would have to sit somewhere that admits both.
 data Relation
   = Table String (Maybe String)
   | Derived Query String
+  | Lateral Query String
 
 -- | The expression AST.
 -- |

@@ -353,6 +353,65 @@ selectSpec = describe "Sqld.Select" do
         "SELECT \"recent\".* FROM (SELECT * FROM \"orders\" WHERE \"status\" = $1) AS \"recent\" WHERE \"recent\".\"total\" > $2"
       result.params `shouldEqual` [LitString "paid", LitInt 100]
 
+  describe "lateral subqueries" do
+    -- The subquery references "u"."id", which only LATERAL makes legal.
+    it "JOIN LATERAL … ON (TRUE)" do
+      let recent = select' (cols ["total"])
+            # from "orders"
+            # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+            # limit 3
+          query = select' [expr (tcol "recent" "total")]
+            # fromAs "users" "u"
+            # joinOn InnerJoin (lateral recent "recent") (and [])
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"recent\".\"total\" FROM \"users\" AS \"u\" JOIN LATERAL (SELECT \"total\" FROM \"orders\" WHERE \"orders\".\"user_id\" = \"u\".\"id\" LIMIT 3) AS \"recent\" ON (TRUE)"
+
+    -- ON TRUE is never supplied implicitly: a lateral join takes whatever
+    -- condition it is given, including a real one.
+    it "keeps an ON condition of its own" do
+      let recent = select' (cols ["total"]) # from "orders"
+          query = select' [star]
+            # fromAs "users" "u"
+            # joinOn InnerJoin (lateral recent "recent") (tcol "recent" "total" .> int 100)
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" JOIN LATERAL (SELECT \"total\" FROM \"orders\") AS \"recent\" ON (\"recent\".\"total\" > 100)"
+
+    it "CROSS JOIN LATERAL" do
+      let recent = select' (cols ["total"])
+            # from "orders"
+            # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+          query = select' [star]
+            # fromAs "users" "u"
+            # joinRel (lateral recent "recent") Cross
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" CROSS JOIN LATERAL (SELECT \"total\" FROM \"orders\" WHERE \"orders\".\"user_id\" = \"u\".\"id\") AS \"recent\""
+
+    it "FROM LATERAL" do
+      let recent = select' (cols ["total"]) # from "orders"
+          query = select' [starFrom "recent"]
+            # fromLateral recent "recent"
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"recent\".* FROM LATERAL (SELECT \"total\" FROM \"orders\") AS \"recent\""
+
+    -- The relation is emitted before its ON clause, and both before the outer
+    -- WHERE, so that is the order the bindings are numbered in.
+    it "numbers the relation's parameters before the ON clause's" do
+      let recent = select' (cols ["total"])
+            # from "orders"
+            # where_ (tcol "orders" "status" .== str "paid")
+          result = select' [star]
+            # fromAs "users" "u"
+            # joinOn InnerJoin (lateral recent "recent") (tcol "recent" "total" .> int 100)
+            # where_ (tcol "u" "active" .== bool true)
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"users\" AS \"u\" JOIN LATERAL (SELECT \"total\" FROM \"orders\" WHERE \"orders\".\"status\" = $1) AS \"recent\" ON (\"recent\".\"total\" > $2) WHERE \"u\".\"active\" = $3"
+      result.params `shouldEqual` [LitString "paid", LitInt 100, LitBoolean true]
+
   describe "common table expressions" do
     it "names an intermediate result set" do
       let recent = select' [star]

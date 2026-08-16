@@ -28,7 +28,7 @@ import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
 import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), Join, JoinCondition(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, joinRel, joinUsing, leftJoinAs, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, joinRel, joinUsing, lateral, leftJoinAs, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -42,6 +42,21 @@ byUser = partitionBy' [ col "user_id" ] # orderWindow [ asc (col "placed_at") ]
 paidOrders :: Query
 paidOrders =
   select' (cols [ "user_id" ]) # from "orders" # where_ (col "status" .== str "paid")
+
+-- | The per-row subquery behind the `LATERAL` entries: the three most recent
+-- | orders of whichever user the join is pairing with.
+-- |
+-- | The reference to `"u"."id"` is what makes it lateral. Drop the marker and
+-- | PostgreSQL rejects the query — an ordinary derived table cannot see the
+-- | relations beside it — so these entries fail without the feature rather than
+-- | merely emitting different SQL.
+recentOrdersOfUser :: Query
+recentOrdersOfUser =
+  select' (cols [ "total" ])
+    # from "orders"
+    # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+    # orderBy [ desc (col "placed_at") ]
+    # limit 3
 
 -- ---------------------------------------------------------------------------
 -- The corpus
@@ -554,6 +569,62 @@ handWritten =
         # where_ (tcol "recent" "total" .> int 100)
     }
 
+  -- LATERAL ------------------------------------------------------------------
+
+  -- The shape LATERAL exists for: a per-row subquery, joined ON TRUE because
+  -- the correlation inside it is the whole of the matching.
+  , { name: "join-lateral"
+    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+        # fromAs "users" "u"
+        # joinOn InnerJoin (lateral recentOrdersOfUser "recent") (and [])
+    }
+
+  -- CROSS JOIN LATERAL says the same thing without the ON clause, and is how
+  -- the comma form of a lateral join is spelled here.
+  , { name: "cross-join-lateral"
+    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+        # fromAs "users" "u"
+        # joinRel (lateral recentOrdersOfUser "recent") Cross
+    }
+
+  -- A lateral join target sits ahead of its own ON clause in the emitted SQL,
+  -- and both sit ahead of the outer WHERE: $1 is the subquery's, $2 the ON
+  -- clause's, $3 the WHERE's.
+  , { name: "join-lateral-parameter-ordering"
+    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+        # fromAs "users" "u"
+        # joinOn InnerJoin
+            ( lateral
+                ( select' (cols [ "total" ])
+                    # from "orders"
+                    # where_
+                        ( and
+                            [ tcol "orders" "user_id" .== tcol "u" "id"
+                            , tcol "orders" "status" .== str "paid"
+                            ]
+                        )
+                    # orderBy [ desc (col "placed_at") ]
+                    # limit 3
+                )
+                "recent"
+            )
+            (tcol "recent" "total" .> int 100)
+        # where_ (tcol "u" "active" .== bool true)
+    }
+
+  -- Nothing stands to the left of the first FROM item, so LATERAL there
+  -- references nothing — PostgreSQL accepts it, which is what this entry
+  -- confirms.
+  , { name: "from-lateral"
+    , query: select' [ starFrom "recent" ]
+        # fromLateral
+            ( select' (cols [ "id", "user_id", "total" ])
+                # from "orders"
+                # where_ (col "status" .== str "paid")
+            )
+            "recent"
+    }
+
   -- Common table expressions --------------------------------------------------
 
   , { name: "with-cte"
@@ -1042,6 +1113,7 @@ relationTags prefix (Table _ alias) = case alias of
   Nothing -> [ prefix ]
   Just _ -> [ prefix, prefix <> ".alias" ]
 relationTags prefix (Derived q _) = (prefix <> ".derived") : queryTags q
+relationTags prefix (Lateral q _) = (prefix <> ".lateral") : queryTags q
 
 setOpTag :: SetOp -> String
 setOpTag = case _ of
@@ -1183,7 +1255,9 @@ requiredTags = Array.sort
   , "Query.join"
   , "Query.join.alias"
   , "Query.join.derived"
+  , "Query.join.lateral"
   , "Query.from.derived"
+  , "Query.from.lateral"
   , "Query.where"
   , "Query.groupBy"
   , "Query.having"

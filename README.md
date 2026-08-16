@@ -55,9 +55,9 @@ await pool.query(query.sql, query.params);
 ## Examples
 
 **[EXAMPLES.md](EXAMPLES.md)** is a worked cookbook — filtering, joins,
-aggregation, window functions, `DISTINCT ON`, subqueries, derived tables,
-common table expressions, composing fragments from optional parameters, and
-when to reach for `raw`.
+aggregation, window functions, `DISTINCT ON`, subqueries, derived and lateral
+tables, common table expressions, composing fragments from optional parameters,
+and when to reach for `raw`.
 
 It is generated from [`src/Example/Cookbook.purs`](src/Example/Cookbook.purs),
 and every example is replayed against a live PostgreSQL server by the
@@ -90,6 +90,7 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `from :: String -> Query -> Query` | FROM table |
 | `fromAs :: String -> String -> Query -> Query` | FROM with alias |
 | `fromSub :: Query -> String -> Query -> Query` | FROM a derived table (subquery + alias) |
+| `fromLateral :: Query -> String -> Query -> Query` | `FROM LATERAL (SELECT …) AS alias` |
 | `where_ :: Expr -> Query -> Query` | Add WHERE condition (ANDs with any existing) |
 | `with_ :: String -> Query -> Query -> Query` | Add a named CTE (`WITH "name" AS (…)`) |
 | `withRecursive :: String -> Query -> Query -> Query` | Add a CTE that may refer to itself |
@@ -101,6 +102,7 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `joinUsing :: JoinType -> String -> Array String -> Query -> Query` | `JOIN … USING ("a", "b")` — match on shared column names |
 | `naturalJoin :: JoinType -> String -> Query -> Query` | `NATURAL <kind> JOIN` — match on every shared column |
 | `joinRel :: Relation -> JoinCondition -> Query -> Query` | Most general form; any relation, any join condition |
+| `lateral :: Query -> String -> Relation` | A `LATERAL` derived table, for `joinOn` or `joinRel` |
 | `union` / `unionAll` | `:: Query -> Query -> Query` — the rows of both, duplicates removed / kept |
 | `intersect` / `intersectAll` | `:: Query -> Query -> Query` — the rows in both |
 | `except` / `exceptAll` | `:: Query -> Query -> Query` — the left query's rows, minus the right's |
@@ -358,6 +360,44 @@ select' [star]
   # fromAs "users" "u"
   # joinOn InnerJoin (derived totals "t") (col "u.id" .== col "t.user_id")
 ```
+
+### Lateral joins
+
+A derived table is evaluated on its own, so it cannot reference the relations
+beside it. `lateral` marks one `LATERAL`, which is what lifts that restriction
+— and with it, the per-row shape: the three most recent orders of *each* user,
+in one join rather than a correlated subquery per column.
+
+```purescript
+select' (cols ["u.name", "recent.total"])
+  # fromAs "users" "u"
+  # joinOn InnerJoin
+      ( lateral
+          ( select' (cols ["total"])
+              # from "orders"
+              # where_ (col "orders.user_id" .== col "u.id")
+              # orderBy [desc (col "placed_at")]
+              # limit 3
+          )
+          "recent"
+      )
+      (and [])
+-- SELECT "u"."name", "recent"."total" FROM "users" AS "u"
+--   JOIN LATERAL (SELECT "total" FROM "orders" WHERE "orders"."user_id" = "u"."id"
+--     ORDER BY "placed_at" DESC LIMIT 3) AS "recent" ON (TRUE)
+```
+
+A lateral join has nothing to match on beyond the correlation inside it, so it
+is usually joined `ON TRUE` — which is what `and []` emits. Nothing supplies
+that implicitly: `joinOn` with a real condition is a legal lateral join too,
+and `joinRel … Cross` gives `CROSS JOIN LATERAL`.
+
+Which relations a lateral one may reference are those to its left, meaning the
+order the joins were added in. PostgreSQL rejects a reference to any other, and
+does so itself rather than the types ruling it out. `fromLateral` puts one
+first in `FROM`, where there is nothing to its left to reference; parameters are
+numbered as ever in emitted-SQL order, so a lateral relation's bindings come
+before its own `ON` clause's, and both before the outer query's.
 
 ### Set operations
 

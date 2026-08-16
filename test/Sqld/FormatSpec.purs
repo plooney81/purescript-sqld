@@ -2,10 +2,10 @@ module Test.Sqld.FormatSpec where
 
 import Prelude (Unit, discard, (#), (<>))
 import Data.String (trim)
-import Sqld.Core (JoinCondition(..), Literal(..))
+import Sqld.Core (JoinCondition(..), JoinType(..), Literal(..))
 import Sqld.Expr (and, bool, col, countStar, currentRow, exists, inSub, int, null, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, tcol, unboundedPreceding, withFrame, (.==))
 import Sqld.Format (format, formatInline, formatPretty)
-import Sqld.Select (as, asc, cols, derived, desc, except, expr, from, fromAs, fromSub, joinRel, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
+import Sqld.Select (as, asc, cols, derived, desc, except, expr, from, fromAs, fromSub, joinOn, joinRel, lateral, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -146,6 +146,31 @@ FROM (
   FROM "orders"
   WHERE "status" = 'paid'
 ) AS "paid"
+"""
+
+    -- LATERAL sits in front of the bracket, so the block below it is laid out
+    -- exactly as a derived table's is.
+    it "lateral join target in FROM" do
+      let query = select' [expr (tcol "recent" "total")]
+            # fromAs "users" "u"
+            # joinOn InnerJoin
+                ( lateral
+                    ( select' (cols ["total"])
+                        # from "orders"
+                        # where_ (tcol "orders" "user_id" .== tcol "u" "id")
+                    )
+                    "recent"
+                )
+                (and [])
+            # formatPretty
+      query `shouldEqual` trim """
+SELECT "recent"."total"
+FROM "users" AS "u"
+JOIN LATERAL (
+  SELECT "total"
+  FROM "orders"
+  WHERE "orders"."user_id" = "u"."id"
+) AS "recent" ON (TRUE)
 """
 
     it "indents one level per level of nesting" do

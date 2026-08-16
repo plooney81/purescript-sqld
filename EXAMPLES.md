@@ -37,6 +37,7 @@ Regenerate with `make examples`.
 - [Scalar subqueries](#scalar-subqueries)
 - [Derived tables](#derived-tables)
 - [Joining a derived table](#joining-a-derived-table)
+- [Lateral joins](#lateral-joins)
 - [Set operations](#set-operations)
 - [Common table expressions](#common-table-expressions)
 - [Recursive CTEs](#recursive-ctes)
@@ -689,6 +690,52 @@ JOIN (
 ```
 
 <sub>Parameterised: <code>SELECT "u"."name", "totals"."order_count" FROM "users" AS "u" JOIN (SELECT "user_id", COUNT(*) AS "order_count" FROM "orders" GROUP BY "user_id") AS "totals" ON ("u"."id" = "totals"."user_id")</code></sub>
+
+---
+
+## Lateral joins
+
+A derived table is evaluated on its own, so it cannot see the relations
+beside it. `lateral` lifts that restriction, and with it the per-row shape:
+the three most recent orders of *each* user, in one join rather than one
+correlated subquery per column.
+
+A lateral join has nothing to match on beyond the correlation itself, so it
+is joined `ON TRUE` — which is what `and []` emits. Nothing supplies it
+implicitly: `joinOn` with a real condition, or `joinRel … Cross` for
+`CROSS JOIN LATERAL`, work just as well.
+
+```purescript
+lateralJoin :: Query
+lateralJoin =
+  select' (cols [ "u.name", "recent.total" ])
+    # fromAs "users" "u"
+    # joinOn InnerJoin
+        ( lateral
+            ( select' (cols [ "total" ])
+                # from "orders"
+                # where_ (col "orders.user_id" .== col "u.id")
+                # orderBy [ desc (col "placed_at") ]
+                # limit 3
+            )
+            "recent"
+        )
+        (and [])
+```
+
+```sql
+SELECT "u"."name", "recent"."total"
+FROM "users" AS "u"
+JOIN LATERAL (
+  SELECT "total"
+  FROM "orders"
+  WHERE "orders"."user_id" = "u"."id"
+  ORDER BY "placed_at" DESC
+  LIMIT 3
+) AS "recent" ON (TRUE)
+```
+
+<sub>Parameterised: <code>SELECT "u"."name", "recent"."total" FROM "users" AS "u" JOIN LATERAL (SELECT "total" FROM "orders" WHERE "orders"."user_id" = "u"."id" ORDER BY "placed_at" DESC LIMIT 3) AS "recent" ON (TRUE)</code></sub>
 
 ---
 
