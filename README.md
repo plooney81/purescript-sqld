@@ -68,7 +68,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `Cte`, `SetOperation`, `Window`, `emptyQuery`, `emptyWindow` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `Cte`, `SetOperation`, `Window`, `emptyQuery`, `emptyWindow`, `Keyword` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |

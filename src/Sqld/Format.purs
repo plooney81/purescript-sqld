@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, FrameBound(..), FrameMode(..), Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window)
+import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, Join, Literal(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -154,10 +154,10 @@ formatSelectBody layout q state0 = Tuple sql s6
 -- | `ORDER BY` and `LIMIT` of its own.
 formatSetOperation :: Layout -> SetOperation -> WithBindings String
 formatSetOperation layout (SetOperation so) state =
-  Tuple (leftSql <> sep <> keyword <> sep <> rightSql) s2
+  Tuple (leftSql <> sep <> kw <> sep <> rightSql) s2
   where
-  sep     = clauseSep layout
-  keyword = setOpKeyword so.op <> if so.all then " ALL" else mempty
+  sep = clauseSep layout
+  kw  = keyword so.op <> if so.all then " ALL" else mempty
 
   Tuple leftSql  s1 = formatOperand layout so.left  state
   Tuple rightSql s2 = formatOperand layout so.right s1
@@ -167,11 +167,6 @@ formatOperand layout q state = Tuple (parenthesise layout sql) s'
   where
   Tuple sql s' = formatQuery (nest layout) q state
 
-setOpKeyword :: SetOp -> String
-setOpKeyword Union     = "UNION"
-setOpKeyword Intersect = "INTERSECT"
-setOpKeyword Except    = "EXCEPT"
-
 -- ---------------------------------------------------------------------------
 -- Clause formatters
 -- ---------------------------------------------------------------------------
@@ -180,9 +175,9 @@ setOpKeyword Except    = "EXCEPT"
 -- | entry makes the whole `WITH` recursive.
 formatWith :: Layout -> Array Cte -> WithBindings String
 formatWith _ [] state = Tuple mempty state
-formatWith layout ctes state = Tuple (keyword <> intercalate ("," <> clauseSep layout) parts) s'
+formatWith layout ctes state = Tuple (kw <> intercalate ("," <> clauseSep layout) parts) s'
   where
-  keyword = if any (\(Cte c) -> c.recursive) ctes then "WITH RECURSIVE " else "WITH "
+  kw = if any (\(Cte c) -> c.recursive) ctes then "WITH RECURSIVE " else "WITH "
 
   Tuple parts s' = mapAccum (formatCte layout) state ctes
 
@@ -251,11 +246,7 @@ formatJoins layout joins state = Tuple (intercalate (clauseSep layout) parts) s'
 formatJoin :: Layout -> Join -> WithBindings String
 formatJoin layout j state = Tuple (kw <> " " <> relSql <> " ON (" <> onSql <> ")") s2
   where
-  kw = case j.type_ of
-    InnerJoin -> "JOIN"
-    LeftJoin  -> "LEFT JOIN"
-    RightJoin -> "RIGHT JOIN"
-    FullJoin  -> "FULL JOIN"
+  kw = keyword j.type_
 
   -- Relation before condition: a derived join target's parameters appear
   -- earlier in the SQL than the ON clause's.
@@ -291,9 +282,7 @@ formatOrderExpr layout { expr, dir } state = Tuple (sql <> " " <> dirSql) s'
   where
   Tuple sql s' = formatExpr layout expr state
 
-  dirSql = case dir of
-    Asc  -> "ASC"
-    Desc -> "DESC"
+  dirSql = keyword dir
 
 formatLimit :: Maybe Int -> String
 formatLimit Nothing  = mempty
@@ -433,23 +422,11 @@ formatPartitionBy layout exprs state = Tuple ("PARTITION BY " <> intercalate ", 
 -- | Carries no bindings: a frame's offsets are literal integers, so there is
 -- | nothing here to parameterise.
 formatFrame :: Frame -> String
-formatFrame { mode, start, end } = frameModeKeyword mode <> " " <> boundsSql
+formatFrame { mode, start, end } = keyword mode <> " " <> boundsSql
   where
   boundsSql = case end of
-    Nothing -> formatFrameBound start
-    Just e  -> "BETWEEN " <> formatFrameBound start <> " AND " <> formatFrameBound e
-
-frameModeKeyword :: FrameMode -> String
-frameModeKeyword Rows   = "ROWS"
-frameModeKeyword Range  = "RANGE"
-frameModeKeyword Groups = "GROUPS"
-
-formatFrameBound :: FrameBound -> String
-formatFrameBound UnboundedPreceding = "UNBOUNDED PRECEDING"
-formatFrameBound (Preceding n)      = show n <> " PRECEDING"
-formatFrameBound CurrentRow         = "CURRENT ROW"
-formatFrameBound (Following n)      = show n <> " FOLLOWING"
-formatFrameBound UnboundedFollowing = "UNBOUNDED FOLLOWING"
+    Nothing -> keyword start
+    Just e  -> "BETWEEN " <> keyword start <> " AND " <> keyword e
 
 -- ---------------------------------------------------------------------------
 -- Helpers

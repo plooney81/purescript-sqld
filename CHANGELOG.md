@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scripts/pg-validate-local.sh` — local runs against a throwaway Docker PostgreSQL container
 - `Makefile` — `make validate`, `validate-fast`, `sql`, `list`, `pg-stop`, and a self-documenting `make help`
 - CI runs the harness against a `postgres:16` service container on every push and pull request
+- `class Keyword a where keyword :: a -> String` in `Sqld.Core` — the fixed SQL keyword a value renders as, with instances for `SetOp`, `JoinType`, `OrderDir`, `FrameMode` and `FrameBound`, each beside the type it belongs to. Only for the AST's leaves: a keyword depends on nothing but the value, so anything whose rendering varies with layout, bindings or position stays in `Sqld.Format`. The instances are exhaustive, so a new constructor on any of the five is still a compile error
 
 ### Changed
 - `col` splits on a dot, so `col "u.id"` is `tcol "u" "id"` and renders `"u"."id"`. Previously the whole string was quoted as a single identifier, which produced SQL PostgreSQL rejects — two golden tests were asserting exactly that, green, because they were never in the validation corpus. `tcol` and `colRef` never split, for identifiers that genuinely contain a dot
@@ -69,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `select` is now additive — calling it multiple times appends to the select list rather than replacing it
 - Table aliases now render with explicit `AS` keyword (`FROM "users" AS "u"` instead of `FROM "users" "u"`)
 - Implicit `SELECT *` removed — use `select [star]` explicitly
+- `setOpKeyword`, `frameModeKeyword` and `formatFrameBound` removed from `Sqld.Format` in favour of the `Keyword` instances in `Sqld.Core`; the module has no export list, so they were public. The inline `case` expressions that spelled out the `JoinType` and `OrderDir` keywords inside `formatJoin` and `formatOrderExpr` go the same way. No emitted SQL changes
 
 ### Fixed
 - `formatPretty` breaks nested subqueries across lines instead of collapsing them onto one. A scalar subquery, `IN (SELECT …)`, `EXISTS (…)` or derived table now gets an indented block of its own, one level per level of nesting — which is the case pretty-printing exists for. Layout is threaded through the formatter as a `Layout` (`Inline` or `Pretty depth`) rather than a bare separator string, so `formatExpr` and `formatRelation` take an extra argument; `format` and `formatInline` are byte-for-byte unchanged, and only whitespace differs in what `formatPretty` emits. Indent width is fixed at two spaces by design
