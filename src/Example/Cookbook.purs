@@ -22,8 +22,8 @@ module Example.Cookbook
 import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
-import Sqld.Core (JoinType(..), Query, emptyQuery)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, num, or, raw, str, sub, sum_, (.<), (.==), (.>), (.>=))
+import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, leftJoinAs, limit, mergeQueries, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
@@ -133,6 +133,41 @@ aggregation =
     # groupBy [ col "department" ]
     # having (countStar .> int 3)
     # orderBy [ desc (col "headcount") ]
+
+-- #example window-functions
+-- # Window functions
+-- `over` evaluates an aggregate — or a window-only function such as
+-- `rowNumber`, `rank` or `lag` — across a set of rows related to the current
+-- one, without collapsing them the way `groupBy` does. Every row survives, and
+-- each carries its own answer.
+--
+-- A window is built the way a query is: `partitionBy'` and `orderWindow'` start
+-- one the way `select'` starts a query, and `partitionBy`, `orderWindow` and
+-- `withFrame` pipe onto it with `#`. So a window used once is written inline,
+-- and one shared by several columns gets a name — `byUser` here, which
+-- `chronological` and `runningTotal` extend. `withFrame` is what turns an
+-- ordered sum into a running one: every row from the start of the partition up
+-- to the current one.
+windowFunctions :: Query
+windowFunctions =
+  select'
+    ( cols [ "user_id", "placed_at", "total" ] <>
+        [ as (rowNumber `over` (partitionBy' [ col "user_id" ] # orderWindow [ desc (col "total") ])) "biggest_first"
+        , as (lag (col "total") 1 `over` chronological) "previous_total"
+        , as (sum_ (col "total") `over` runningTotal) "running_total"
+        ]
+    )
+    # from "orders"
+    # where_ (col "status" .== str "paid")
+
+byUser :: Window
+byUser = partitionBy' [ col "user_id" ]
+
+chronological :: Window
+chronological = byUser # orderWindow [ asc (col "placed_at") ]
+
+runningTotal :: Window
+runningTotal = chronological # withFrame (rows unboundedPreceding currentRow)
 
 -- #example functions-and-casts
 -- # Functions, casts and arbitrary operators
@@ -407,6 +442,7 @@ cookbook =
   , { name: "right-join",           query: rightJoinExample }
   , { name: "full-join",            query: fullJoinExample }
   , { name: "aggregation",          query: aggregation }
+  , { name: "window-functions",     query: windowFunctions }
   , { name: "functions-and-casts",  query: functionsAndCasts }
   , { name: "exists",               query: existsExample }
   , { name: "not-exists",           query: notExistsExample }

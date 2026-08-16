@@ -24,6 +24,7 @@ Regenerate with `make examples`.
 - [Right joins](#right-joins)
 - [Full joins](#full-joins)
 - [Aggregation](#aggregation)
+- [Window functions](#window-functions)
 - [Functions, casts and arbitrary operators](#functions-casts-and-arbitrary-operators)
 - [EXISTS](#exists)
 - [NOT EXISTS](#not-exists)
@@ -261,6 +262,56 @@ ORDER BY "headcount" DESC
 Bound parameters: `$1` = `true`, `$2` = `3`
 
 <sub>Parameterised: <code>SELECT "department", COUNT(*) AS "headcount", COUNT("email") AS "with_email", AVG("age") AS "mean_age" FROM "users" WHERE "active" = $1 GROUP BY "department" HAVING COUNT(*) > $2 ORDER BY "headcount" DESC</code></sub>
+
+---
+
+## Window functions
+
+`over` evaluates an aggregate — or a window-only function such as
+`rowNumber`, `rank` or `lag` — across a set of rows related to the current
+one, without collapsing them the way `groupBy` does. Every row survives, and
+each carries its own answer.
+
+A window is built the way a query is: `partitionBy'` and `orderWindow'` start
+one the way `select'` starts a query, and `partitionBy`, `orderWindow` and
+`withFrame` pipe onto it with `#`. So a window used once is written inline,
+and one shared by several columns gets a name — `byUser` here, which
+`chronological` and `runningTotal` extend. `withFrame` is what turns an
+ordered sum into a running one: every row from the start of the partition up
+to the current one.
+
+```purescript
+windowFunctions :: Query
+windowFunctions =
+  select'
+    ( cols [ "user_id", "placed_at", "total" ] <>
+        [ as (rowNumber `over` (partitionBy' [ col "user_id" ] # orderWindow [ desc (col "total") ])) "biggest_first"
+        , as (lag (col "total") 1 `over` chronological) "previous_total"
+        , as (sum_ (col "total") `over` runningTotal) "running_total"
+        ]
+    )
+    # from "orders"
+    # where_ (col "status" .== str "paid")
+
+byUser :: Window
+byUser = partitionBy' [ col "user_id" ]
+
+chronological :: Window
+chronological = byUser # orderWindow [ asc (col "placed_at") ]
+
+runningTotal :: Window
+runningTotal = chronological # withFrame (rows unboundedPreceding currentRow)
+```
+
+```sql
+SELECT "user_id", "placed_at", "total", ROW_NUMBER() OVER (PARTITION BY "user_id" ORDER BY "total" DESC) AS "biggest_first", LAG("total", 1) OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC) AS "previous_total", SUM("total") OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "running_total"
+FROM "orders"
+WHERE "status" = 'paid'
+```
+
+Bound parameters: `$1` = `1`, `$2` = `"paid"`
+
+<sub>Parameterised: <code>SELECT "user_id", "placed_at", "total", ROW_NUMBER() OVER (PARTITION BY "user_id" ORDER BY "total" DESC) AS "biggest_first", LAG("total", $1) OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC) AS "previous_total", SUM("total") OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "running_total" FROM "orders" WHERE "status" = $2</code></sub>
 
 ---
 

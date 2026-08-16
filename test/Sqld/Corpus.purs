@@ -26,11 +26,16 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Expr(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..))
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, exists, ilike, in_, inSub, int, isNotNull, isNull, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, raw, str, sub, sum_, tcol, upper, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Core (Cte(..), Expr(..), Frame, FrameBound(..), FrameMode(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, cte, cteColumns, cteRecursive, derived, desc, except, exceptAll, expr, exprs, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinOn, leftJoinAs, limit, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
+
+-- | A window shared by more than one corpus entry, so a named `Window` is
+-- | exercised alongside the ones built inline.
+byUser :: Window
+byUser = partitionBy' [ col "user_id" ] # orderWindow [ asc (col "placed_at") ]
 
 -- ---------------------------------------------------------------------------
 -- The corpus
@@ -713,6 +718,141 @@ handWritten =
                 ]
             )
     }
+
+  -- Window functions -----------------------------------------------------------
+
+  , { name: "window-row-number"
+    , query: select'
+        ( cols [ "name", "department" ] <>
+            [ as
+                ( rowNumber `over`
+                    ( partitionBy' [ col "department" ]
+                        # orderWindow [ desc (col "age") ]
+                    )
+                )
+                "rn"
+            ]
+        )
+        # from "users"
+    }
+
+  -- An empty window is `OVER ()`: one partition, unordered, unframed.
+  , { name: "window-empty"
+    , query: select' (cols [ "id" ] <> [ as (countStar `over` emptyWindow) "total" ])
+        # from "users"
+    }
+
+  , { name: "window-rank-dense-rank"
+    , query: select'
+        ( cols [ "name" ] <>
+            [ as (rank `over` orderWindow' [ desc (col "score") ]) "rank"
+            , as (denseRank `over` orderWindow' [ desc (col "score") ]) "dense_rank"
+            ]
+        )
+        # from "users"
+    }
+
+  -- A named window, shared by two columns: `over` takes the `Window` itself.
+  , { name: "window-lag-lead"
+    , query: select'
+        ( cols [ "placed_at", "total" ] <>
+            [ as (lag (col "total") 1 `over` byUser) "previous_total"
+            , as (lead (col "total") 1 `over` byUser) "next_total"
+            ]
+        )
+        # from "orders"
+    }
+
+  -- A running total: the frame runs from the start of the partition to the
+  -- current row.
+  , { name: "window-frame-rows"
+    , query: select'
+        ( cols [ "user_id", "total" ] <>
+            [ as
+                ( sum_ (col "total")
+                    `over` (byUser # withFrame (rows unboundedPreceding currentRow))
+                )
+                "running_total"
+            ]
+        )
+        # from "orders"
+    }
+
+  -- Offset bounds are emitted literally rather than as parameters.
+  , { name: "window-frame-rows-offsets"
+    , query: select'
+        [ as
+            ( avg (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (rows (preceding 3) (following 1))
+                )
+            )
+            "moving_average"
+        ]
+        # from "orders"
+    }
+
+  , { name: "window-frame-range"
+    , query: select'
+        [ as
+            ( sum_ (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (range currentRow unboundedFollowing)
+                )
+            )
+            "remaining_total"
+        ]
+        # from "orders"
+    }
+
+  -- PostgreSQL requires an ordered window in GROUPS mode, and the harness is
+  -- what holds us to that.
+  , { name: "window-frame-groups"
+    , query: select'
+        [ as
+            ( sum_ (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (groups unboundedPreceding currentRow)
+                )
+            )
+            "total_to_date"
+        ]
+        # from "orders"
+    }
+
+  -- The one-bound form, `ROWS UNBOUNDED PRECEDING`, runs to the current row.
+  , { name: "window-frame-one-bound"
+    , query: select'
+        [ as
+            ( sum_ (col "total") `over`
+                ( orderWindow' [ asc (col "placed_at") ]
+                    # withFrame (frameFrom Rows unboundedPreceding)
+                )
+            )
+            "running_total"
+        ]
+        # from "orders"
+    }
+
+  -- A window function is legal in ORDER BY as well as in SELECT.
+  , { name: "window-in-order-by"
+    , query: select' (cols [ "name" ])
+        # from "users"
+        # orderBy [ asc (rank `over` orderWindow' [ desc (col "score") ]) ]
+    }
+
+  -- A window's parameters sit in the select list, so they are numbered before
+  -- the WHERE clause's.
+  , { name: "window-parameter-ordering"
+    , query: select'
+        [ as
+            ( countStar `over` partitionBy' [ coalesce [ col "department", str "unknown" ] ]
+            )
+            "headcount"
+        ]
+        # from "users"
+        # where_ (col "active" .== bool true)
+    }
   ]
 
 -- ---------------------------------------------------------------------------
@@ -741,10 +881,44 @@ exprTags e = case e of
   And xs -> node (if Array.null xs then "Expr.And.empty" else "Expr.And") xs
   Or xs -> node (if Array.null xs then "Expr.Or.empty" else "Expr.Or") xs
   Between x lo hi -> node "Expr.Between" [ x, lo, hi ]
+  Over f w -> ("Expr.Over" : exprTags f) <> windowTags w
   Raw _ -> [ "Expr.Raw" ]
   where
   node tag kids = tag : Array.concatMap exprTags kids
   nodes tags kids = tags <> Array.concatMap exprTags kids
+
+windowTags :: Window -> Array String
+windowTags w =
+  clause "Window.partitionBy" (Array.concatMap exprTags w.partitionBy) (Array.null w.partitionBy)
+    <> clause "Window.orderBy" (Array.concatMap orderTags w.orderBy) (Array.null w.orderBy)
+    <> case w.frame of
+         Nothing -> []
+         Just f -> frameTags f
+  where
+  clause tag inner isEmpty = if isEmpty then [] else tag : inner
+
+-- | The one-bound and `BETWEEN` forms are tagged apart, so the ratchet holds
+-- | each to a corpus entry of its own.
+frameTags :: Frame -> Array String
+frameTags f =
+  [ "Window.frame", frameModeTag f.mode, frameBoundTag f.start ]
+    <> case f.end of
+         Nothing -> []
+         Just b -> [ "Window.frame.between", frameBoundTag b ]
+
+frameModeTag :: FrameMode -> String
+frameModeTag = case _ of
+  Rows -> "FrameMode.Rows"
+  Range -> "FrameMode.Range"
+  Groups -> "FrameMode.Groups"
+
+frameBoundTag :: FrameBound -> String
+frameBoundTag = case _ of
+  UnboundedPreceding -> "FrameBound.UnboundedPreceding"
+  Preceding _ -> "FrameBound.Preceding"
+  CurrentRow -> "FrameBound.CurrentRow"
+  Following _ -> "FrameBound.Following"
+  UnboundedFollowing -> "FrameBound.UnboundedFollowing"
 
 literalTag :: Literal -> String
 literalTag = case _ of
@@ -869,7 +1043,20 @@ requiredTags = Array.sort
   , "Expr.Or"
   , "Expr.Or.empty"
   , "Expr.Between"
+  , "Expr.Over"
   , "Expr.Raw"
+  , "Window.partitionBy"
+  , "Window.orderBy"
+  , "Window.frame"
+  , "Window.frame.between"
+  , "FrameMode.Rows"
+  , "FrameMode.Range"
+  , "FrameMode.Groups"
+  , "FrameBound.UnboundedPreceding"
+  , "FrameBound.Preceding"
+  , "FrameBound.CurrentRow"
+  , "FrameBound.Following"
+  , "FrameBound.UnboundedFollowing"
   , "Literal.LitInt"
   , "Literal.LitNumber"
   , "Literal.LitString"

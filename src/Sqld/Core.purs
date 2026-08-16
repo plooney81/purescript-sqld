@@ -46,6 +46,9 @@ data Expr
   | And (Array Expr)
   | Or (Array Expr)
   | Between Expr Expr Expr
+  -- | A window function and the window it is evaluated over:
+  -- | `f(…) OVER (PARTITION BY … ORDER BY … <frame>)`.
+  | Over Expr Window
   | Raw String
 
 data Literal
@@ -85,6 +88,55 @@ type Join =
 data OrderDir = Asc | Desc
 
 type OrderExpr = { expr :: Expr, dir :: OrderDir }
+
+-- | The window a window function is evaluated over: the `(…)` of
+-- | `ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)`.
+-- |
+-- | A record synonym rather than a `newtype`, unlike `Cte` and `SetOperation`.
+-- | Those close a cycle between two synonyms, which PureScript rejects; this
+-- | one runs back to `Expr`, and expansion stops at a `data` declaration.
+-- |
+-- | Every field is optional. `emptyWindow` emits `OVER ()`, which is valid and
+-- | means the whole result set is one partition, unordered and unframed.
+type Window =
+  { partitionBy :: Array Expr
+  , orderBy     :: Array OrderExpr
+  , frame       :: Maybe Frame
+  }
+
+emptyWindow :: Window
+emptyWindow = { partitionBy: [], orderBy: [], frame: Nothing }
+
+-- | What a frame counts: physical rows, a range of `ORDER BY` values, or whole
+-- | peer groups.
+data FrameMode
+  = Rows
+  | Range
+  | Groups
+
+-- | One end of a frame.
+-- |
+-- | The offsets are emitted literally rather than as parameters, which keeps a
+-- | frame out of the bindings entirely. PostgreSQL asks only that an offset
+-- | contain no variables, aggregates or window functions, and a literal never
+-- | does.
+data FrameBound
+  = UnboundedPreceding
+  | Preceding Int
+  | CurrentRow
+  | Following Int
+  | UnboundedFollowing
+
+-- | Which rows of the partition a window function sees:
+-- | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`, and its kin.
+-- |
+-- | An absent `end` is SQL's one-bound form, `ROWS UNBOUNDED PRECEDING`, which
+-- | runs from `start` to the current row.
+type Frame =
+  { mode  :: FrameMode
+  , start :: FrameBound
+  , end   :: Maybe FrameBound
+  }
 
 -- | One entry in a `WITH` clause: a named intermediate result set.
 -- |

@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Expr(..), FormattedQuery, Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..))
+import Sqld.Core (Cte(..), Expr(..), FormattedQuery, Frame, FrameBound(..), FrameMode(..), Join, JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -299,7 +299,8 @@ formatOffset (Just n) = "OFFSET " <> show n
 -- `And` and `Or` are deliberately absent: they parenthesise themselves, so as
 -- far as the surrounding expression is concerned they are atoms. `Raw` is an
 -- atom too — its contents are opaque, so its parenthesisation is the caller's
--- responsibility.
+-- responsibility. So is `Over`, which binds tighter in PostgreSQL than any
+-- operator that could contain it.
 
 atomPrec :: Int
 atomPrec = 99
@@ -383,7 +384,58 @@ formatExpr layout (Between e lo hi) state =
   Tuple eSql  s1 = formatChild layout 7 e  state
   Tuple loSql s2 = formatChild layout 7 lo s1
   Tuple hiSql s3 = formatChild layout 7 hi s2
+formatExpr layout (Over e w) state = Tuple (fnSql <> " OVER " <> windowSql) s2
+  where
+  -- `OVER` binds tighter than any operator, so its function is formatted at
+  -- atom level: anything looser brackets itself.
+  Tuple fnSql     s1 = formatChild layout atomPrec e state
+  Tuple windowSql s2 = formatWindow layout w s1
 formatExpr _ (Raw sql) state = Tuple sql state
+
+-- ---------------------------------------------------------------------------
+-- Windows
+-- ---------------------------------------------------------------------------
+
+-- | The `(…)` of an `OVER` clause. Always bracketed, and always on one line —
+-- | a window is part of an expression, not a clause of its own, so `Pretty` does
+-- | not break it up.
+-- |
+-- | An empty window emits `()`, which PostgreSQL accepts.
+formatWindow :: Layout -> Window -> WithBindings String
+formatWindow layout w state0 = Tuple ("(" <> intercalate " " parts <> ")") s2
+  where
+  Tuple partitionSql s1 = formatPartitionBy layout w.partitionBy state0
+  Tuple orderBySql   s2 = formatOrderBy     layout w.orderBy     s1
+
+  parts = Array.filter (_ /= mempty)
+    [ partitionSql, orderBySql, maybe mempty formatFrame w.frame ]
+
+formatPartitionBy :: Layout -> Array Expr -> WithBindings String
+formatPartitionBy _ [] state = Tuple mempty state
+formatPartitionBy layout exprs state = Tuple ("PARTITION BY " <> intercalate ", " parts) s'
+  where
+  Tuple parts s' = mapAccum (formatExpr layout) state exprs
+
+-- | Carries no bindings: a frame's offsets are literal integers, so there is
+-- | nothing here to parameterise.
+formatFrame :: Frame -> String
+formatFrame { mode, start, end } = frameModeKeyword mode <> " " <> boundsSql
+  where
+  boundsSql = case end of
+    Nothing -> formatFrameBound start
+    Just e  -> "BETWEEN " <> formatFrameBound start <> " AND " <> formatFrameBound e
+
+frameModeKeyword :: FrameMode -> String
+frameModeKeyword Rows   = "ROWS"
+frameModeKeyword Range  = "RANGE"
+frameModeKeyword Groups = "GROUPS"
+
+formatFrameBound :: FrameBound -> String
+formatFrameBound UnboundedPreceding = "UNBOUNDED PRECEDING"
+formatFrameBound (Preceding n)      = show n <> " PRECEDING"
+formatFrameBound CurrentRow         = "CURRENT ROW"
+formatFrameBound (Following n)      = show n <> " FOLLOWING"
+formatFrameBound UnboundedFollowing = "UNBOUNDED FOLLOWING"
 
 -- ---------------------------------------------------------------------------
 -- Helpers

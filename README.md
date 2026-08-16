@@ -55,8 +55,9 @@ await pool.query(query.sql, query.params);
 ## Examples
 
 **[EXAMPLES.md](EXAMPLES.md)** is a worked cookbook — filtering, joins,
-aggregation, subqueries, derived tables, common table expressions, composing
-fragments from optional parameters, and when to reach for `raw`.
+aggregation, window functions, subqueries, derived tables, common table
+expressions, composing fragments from optional parameters, and when to reach
+for `raw`.
 
 It is generated from [`src/Example/Cookbook.purs`](src/Example/Cookbook.purs),
 and every example is replayed against a live PostgreSQL server by the
@@ -67,7 +68,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Cte`, `SetOperation`, `emptyQuery` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Cte`, `SetOperation`, `Window`, `emptyQuery`, `emptyWindow` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
@@ -190,6 +191,70 @@ still reachable without falling back to `raw`:
 Common aggregates and functions are provided as one-line wrappers over `app`:
 `count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`,
 `upper`.
+
+### Window functions
+
+`over` evaluates an aggregate — or a window-only function such as `rowNumber`,
+`rank` or `lag` — across rows related to the current one, without collapsing
+them the way `groupBy` does:
+
+```purescript
+rowNumber `over`
+  ( partitionBy' [col "department"]
+      # orderWindow [desc (col "age")]
+  )
+-- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
+```
+
+A window is built the way a query is. `partitionBy'` and `orderWindow'` start
+one, as `select'` starts a query, and `partitionBy`, `orderWindow` and
+`withFrame` pipe onto it with `#`. Every field is optional, and
+``e `over` emptyWindow`` emits `OVER ()`, which is valid SQL.
+
+Windows are values, so name one that several columns share and add to it:
+
+```purescript
+byUser :: Window
+byUser = partitionBy' [col "user_id"] # orderWindow [asc (col "placed_at")]
+
+sum_ (col "total") `over` (byUser # withFrame (rows unboundedPreceding currentRow))
+-- SUM("total") OVER (PARTITION BY "user_id" ORDER BY "placed_at" ASC
+--                    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+```
+
+| Constructor | Example | SQL |
+|---|---|---|
+| `over :: Expr -> Window -> Expr` | ``countStar `over` emptyWindow`` | `COUNT(*) OVER ()` |
+| `partitionBy' :: Array Expr -> Window` | `partitionBy' [col "department"]` | `PARTITION BY "department"` |
+| `orderWindow' :: Array OrderExpr -> Window` | `orderWindow' [desc (col "age")]` | `ORDER BY "age" DESC` |
+| `partitionBy` / `orderWindow` | `byUser # orderWindow [asc (col "placed_at")]` | adds to an existing window |
+| `withFrame :: Frame -> Window -> Window` | `withFrame (rows unboundedPreceding currentRow)` | `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` |
+| `rowNumber` / `rank` / `denseRank` | `rank` | `RANK()` |
+| `lag` / `lead :: Expr -> Int -> Expr` | `lag (col "total") 1` | `LAG("total", $1)` |
+| `rows` / `range` / `groups` | `rows (preceding 3) currentRow` | `ROWS BETWEEN 3 PRECEDING AND CURRENT ROW` |
+| `frameBetween :: FrameMode -> FrameBound -> FrameBound -> Frame` | `frameBetween Range currentRow unboundedFollowing` | `RANGE BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING` |
+| `frameFrom :: FrameMode -> FrameBound -> Frame` | `frameFrom Rows unboundedPreceding` | `ROWS UNBOUNDED PRECEDING` |
+| `unboundedPreceding` / `currentRow` / `unboundedFollowing` | `currentRow` | `CURRENT ROW` |
+| `preceding` / `following :: Int -> FrameBound` | `preceding 3` | `3 PRECEDING` |
+
+`orderWindow` is the one name that does not match its SQL keyword: `orderBy`
+already belongs to `Sqld.Select`, and a second one here would collide in any
+module importing both. There is no `withFrame'`, because a frame over unordered
+rows frames nothing in particular — and in `RANGE` or `GROUPS` mode PostgreSQL
+rejects one outright. `Window` is an ordinary record (`partitionBy`, `orderBy`,
+`frame`), so record update reaches the fields directly if you prefer it; the
+builders are setters over exactly those three.
+
+Frame offsets are emitted literally rather than as parameters, so a frame
+carries no bindings; a window's `PARTITION BY` and `ORDER BY` expressions do,
+and they are numbered where they appear, which in a select list is ahead of the
+`WHERE` clause's.
+
+`OVER` binds tighter than any operator, so a window function is an atom that
+never needs bracketing. PostgreSQL allows one in `SELECT` and `ORDER BY` only,
+and rejects it in `WHERE`, `GROUP BY` and `HAVING`; the type does not express
+that, so it is the database that reports the mistake. Named windows
+(`WINDOW w AS (…)`) are not supported.
 
 ### Derived tables
 

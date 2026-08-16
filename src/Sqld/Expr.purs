@@ -10,7 +10,7 @@ module Sqld.Expr where
 import Prelude (($), (+), (<<<))
 import Data.Maybe (Maybe(..))
 import Data.String as String
-import Sqld.Core (Expr(..), Literal(..), Query)
+import Sqld.Core (Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), OrderExpr, Query, Window, emptyWindow)
 
 -- ---------------------------------------------------------------------------
 -- Column references
@@ -232,3 +232,134 @@ lower e = App "LOWER" [ e ]
 
 upper :: Expr -> Expr
 upper e = App "UPPER" [ e ]
+
+-- ---------------------------------------------------------------------------
+-- Window functions
+-- ---------------------------------------------------------------------------
+
+-- | Evaluates an aggregate or window function over a window rather than over
+-- | the whole group:
+-- |
+-- |     rowNumber `over`
+-- |       ( partitionBy' [ col "department" ]
+-- |           # orderWindow [ desc (col "age") ]
+-- |       )
+-- |     -- ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)
+-- |
+-- | The window builders below start from `partitionBy'` or `orderWindow'` and
+-- | pipe on with `#`, the way a query is built. Every field is optional, and
+-- | `` e `over` emptyWindow `` is `OVER ()`.
+-- |
+-- | PostgreSQL allows a window function in `SELECT` and `ORDER BY` only, and
+-- | rejects one in `WHERE`, `GROUP BY` or `HAVING`. That is not expressed in the
+-- | type — an `Over` is an ordinary `Expr` — so it is the database that reports
+-- | the mistake.
+over :: Expr -> Window -> Expr
+over = Over
+
+-- ---------------------------------------------------------------------------
+-- Window builders
+-- ---------------------------------------------------------------------------
+--
+-- Plain `Window -> Window` functions that pipe together with `#`, exactly as
+-- the `Sqld.Select` builders do, starting from `partitionBy'`, `orderWindow'`
+-- or `emptyWindow`. Each replaces its field rather than appending to it.
+
+partitionBy :: Array Expr -> Window -> Window
+partitionBy exprs w = w { partitionBy = exprs }
+
+-- | Starts a window from its partition, so the common case need not name
+-- | `emptyWindow` — the same shorthand `select'` is for `emptyQuery`:
+-- |
+-- |     partitionBy' [ col "user_id" ] # orderWindow [ asc (col "placed_at") ]
+partitionBy' :: Array Expr -> Window
+partitionBy' exprs = partitionBy exprs emptyWindow
+
+-- | A window's `ORDER BY`, which decides both the order rows are numbered in
+-- | and, for a `RANGE` or `GROUPS` frame, which rows count as peers.
+-- |
+-- | Named `orderWindow` rather than `orderBy` because `Sqld.Select` already
+-- | uses that name for a query's ordering, and the two would collide in any
+-- | module importing both unqualified.
+orderWindow :: Array OrderExpr -> Window -> Window
+orderWindow orders w = w { orderBy = orders }
+
+-- | Starts a window from its ordering, the counterpart to `partitionBy'` for a
+-- | window with no partition — which is what a frame usually wants:
+-- |
+-- |     orderWindow' [ asc (col "placed_at") ] # withFrame (rows unboundedPreceding currentRow)
+-- |
+-- | There is deliberately no `withFrame'`: a frame over unordered rows frames
+-- | nothing in particular, and `RANGE` and `GROUPS` mode PostgreSQL rejects
+-- | outright without an `ORDER BY`.
+orderWindow' :: Array OrderExpr -> Window
+orderWindow' orders = orderWindow orders emptyWindow
+
+-- | Sets the frame, taking the `Frame` rather than a `Maybe Frame`: a window
+-- | either has one or is left alone.
+withFrame :: Frame -> Window -> Window
+withFrame f w = w { frame = Just f }
+
+-- | `ROW_NUMBER()` — the row's position in its partition, ties broken
+-- | arbitrarily.
+rowNumber :: Expr
+rowNumber = App "ROW_NUMBER" []
+
+-- | `RANK()` — position with gaps after ties.
+rank :: Expr
+rank = App "RANK" []
+
+-- | `DENSE_RANK()` — position without gaps after ties.
+denseRank :: Expr
+denseRank = App "DENSE_RANK" []
+
+-- | `LAG(e, n)` — `e` from the row `n` places back in the partition, or `NULL`
+-- | at the start of one.
+lag :: Expr -> Int -> Expr
+lag e n = App "LAG" [ e, int n ]
+
+-- | `LEAD(e, n)` — the mirror of `lag`, looking forward.
+lead :: Expr -> Int -> Expr
+lead e n = App "LEAD" [ e, int n ]
+
+-- ---------------------------------------------------------------------------
+-- Window frames
+-- ---------------------------------------------------------------------------
+
+-- | `ROWS BETWEEN start AND end` — a frame counted in physical rows.
+rows :: FrameBound -> FrameBound -> Frame
+rows = frameBetween Rows
+
+-- | `RANGE BETWEEN start AND end` — a frame counted in `ORDER BY` values, so
+-- | peers share a frame. An offset bound needs exactly one `ORDER BY` column.
+range :: FrameBound -> FrameBound -> Frame
+range = frameBetween Range
+
+-- | `GROUPS BETWEEN start AND end` — a frame counted in peer groups.
+-- | PostgreSQL requires the window to be ordered.
+groups :: FrameBound -> FrameBound -> Frame
+groups = frameBetween Groups
+
+-- | The general form: any mode, both bounds.
+frameBetween :: FrameMode -> FrameBound -> FrameBound -> Frame
+frameBetween mode start end = { mode, start, end: Just end }
+
+-- | SQL's one-bound form, `ROWS UNBOUNDED PRECEDING`, which runs from `start`
+-- | to the current row.
+frameFrom :: FrameMode -> FrameBound -> Frame
+frameFrom mode start = { mode, start, end: Nothing }
+
+unboundedPreceding :: FrameBound
+unboundedPreceding = UnboundedPreceding
+
+preceding :: Int -> FrameBound
+preceding = Preceding
+
+currentRow :: FrameBound
+currentRow = CurrentRow
+
+following :: Int -> FrameBound
+following = Following
+
+unboundedFollowing :: FrameBound
+unboundedFollowing = UnboundedFollowing
