@@ -24,7 +24,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
 import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -348,6 +348,31 @@ derivedTableJoin =
         )
         (col "u.id" .== col "totals.user_id")
 
+-- #example lateral-join
+-- # Lateral joins
+-- A derived table is evaluated on its own, so it cannot see the relations
+-- beside it. `lateral` lifts that restriction, and with it the per-row shape:
+-- the three most recent orders of *each* user, in one join rather than one
+-- correlated subquery per column.
+--
+-- The correlation inside the subquery is the whole of the matching, so a
+-- lateral join has nothing left to say in a condition and `joinLateral` joins
+-- `ON TRUE`. Use `leftJoinLateral` to keep users whose subquery finds nothing;
+-- those are the only two kinds, because PostgreSQL rejects a lateral reference
+-- from the right operand of a `RIGHT` or `FULL` join.
+lateralJoin :: Query
+lateralJoin =
+  select' (cols [ "u.name", "recent.total" ])
+    # fromAs "users" "u"
+    # joinLateral
+        ( select' (cols [ "total" ])
+            # from "orders"
+            # where_ (col "orders.user_id" .== col "u.id")
+            # orderBy [ desc (col "placed_at") ]
+            # limit 3
+        )
+        "recent"
+
 -- #example set-operations
 -- # Set operations
 -- `union`, `intersect` and `except` combine two result sets; each has an `All`
@@ -519,6 +544,7 @@ cookbook =
   , { name: "scalar-subquery",      query: scalarSubquery }
   , { name: "derived-table",        query: derivedTable }
   , { name: "derived-table-join",   query: derivedTableJoin }
+  , { name: "lateral-join",         query: lateralJoin }
   , { name: "set-operations",       query: setOperations }
   , { name: "common-table-expressions", query: commonTableExpressions }
   , { name: "recursive-cte",        query: recursiveCte }

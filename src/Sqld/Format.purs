@@ -236,6 +236,11 @@ formatRelation layout (Derived q alias) state =
   Tuple (parenthesise layout sql <> " AS " <> quoteIdent alias) s'
   where
   Tuple sql s' = formatQuery (nest layout) q state
+-- `LATERAL` is a marker on the derived form and nothing more, so it is emitted
+-- as one: the relation renders exactly as it would without it.
+formatRelation layout (Lateral q alias) state = Tuple ("LATERAL " <> sql) s'
+  where
+  Tuple sql s' = formatRelation layout (Derived q alias) state
 
 formatJoins :: Layout -> Array Join -> WithBindings String
 formatJoins _ [] state = Tuple mempty state
