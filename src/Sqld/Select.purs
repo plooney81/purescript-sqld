@@ -2,8 +2,8 @@ module Sqld.Select where
 
 import Data.Array (null) as Array
 import Data.Maybe (Maybe(..))
-import Prelude (($), (<<<), (<>), map)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), JoinCondition(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
+import Prelude (identity, ($), (<<<), (<>), map)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), JoinCondition(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
 import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -326,8 +326,62 @@ fullJoinAs table alias = joinOn FullJoin (relAs table alias)
 orderBy :: Array OrderExpr -> Query -> Query
 orderBy exprs q = q { orderBy = exprs }
 
+-- | `GROUP BY expr, …` — one result row per distinct combination of the
+-- | expressions.
+-- |
+-- | Additive, like `select`: a later call appends rather than replaces. That is
+-- | what lets a plain grouping and a multi-grouping construct share the one
+-- | clause SQL gives them —
+-- |
+-- |     groupBy [ col "department" ] >>> groupByRollup [ col "active" ]
+-- |     -- GROUP BY "department", ROLLUP ("active")
+-- |
+-- | — and it is what `mergeQueries` has always done with the clause.
 groupBy :: Array Expr -> Query -> Query
-groupBy exprs q = q { groupBy = exprs }
+groupBy = groupByElements <<< map GroupingExpr
+
+-- | `GROUP BY GROUPING SETS ((…), (…), …)` — one grouping per set named, and
+-- | the result is every group of every set, in one pass over the table.
+-- |
+-- |     groupBySets [ [ col "department" ], [ col "department", col "active" ], [] ]
+-- |     -- GROUP BY GROUPING SETS (("department"), ("department", "active"), ())
+-- |
+-- | The empty set groups by nothing, which is one group holding every row: the
+-- | grand total. Columns absent from a set come back `NULL` in its rows, which
+-- | is what `GROUPING(…)` — `app "GROUPING" [ col "department" ]` — tells apart
+-- | from a `NULL` in the data.
+-- |
+-- | No sets at all adds nothing to the query: `GROUPING SETS ()` is not
+-- | something PostgreSQL parses, and an empty list arises naturally when the
+-- | sets are driven by user input. `groupBySets [ [] ]` is the grand total, and
+-- | is a different thing.
+groupBySets :: Array (Array Expr) -> Query -> Query
+groupBySets [] = identity
+groupBySets sets = groupByElements [ GroupingSets sets ]
+
+-- | `GROUP BY CUBE (a, b)` — every combination of the expressions:
+-- | `(a, b), (a), (b), ()`. The cross-tabulation, subtotalled along both axes
+-- | and totalled at the corner.
+-- |
+-- | An empty list adds nothing, for the reason given on `groupBySets`.
+groupByCube :: Array Expr -> Query -> Query
+groupByCube [] = identity
+groupByCube exprs = groupByElements [ Cube exprs ]
+
+-- | `GROUP BY ROLLUP (a, b)` — every prefix of the expressions:
+-- | `(a, b), (a), ()`. The subtotals down one hierarchy, ordered from the most
+-- | detailed to the grand total, which is what `CUBE` gives up its symmetry to
+-- | say: `ROLLUP ("country", "city")` totals a country's cities but never a
+-- | city across countries.
+-- |
+-- | An empty list adds nothing, for the reason given on `groupBySets`.
+groupByRollup :: Array Expr -> Query -> Query
+groupByRollup [] = identity
+groupByRollup exprs = groupByElements [ Rollup exprs ]
+
+-- | The general form: any grouping elements, appended to the clause.
+groupByElements :: Array GroupingElement -> Query -> Query
+groupByElements elements q = q { groupBy = q.groupBy <> elements }
 
 having :: Expr -> Query -> Query
 having e q = q { having = Just e }

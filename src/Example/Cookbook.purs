@@ -23,8 +23,8 @@ import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
+import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -166,6 +166,31 @@ aggregation =
     # groupBy [ col "department" ]
     # having (countStar .> int 3)
     # orderBy [ desc (col "headcount") ]
+
+-- #example grouping-sets
+-- # Subtotals with ROLLUP, CUBE and GROUPING SETS
+-- A plain `groupBy` gives one level of detail. `groupByRollup` gives every
+-- prefix of its expressions — `(department, active)`, then `(department)`, then
+-- `()` — so the groups, the per-department subtotals and the grand total all
+-- come back from one pass over the table. `groupByCube` gives every combination
+-- rather than every prefix, and `groupBySets` names the groupings one by one,
+-- where `[]` is that grand total.
+--
+-- A subtotal row carries `NULL` in the columns it rolled up, which is the same
+-- `NULL` a user with no department has. `GROUPING(…)` tells the two apart: 1
+-- where the column was rolled up, 0 where it was grouped by. It needs no
+-- builder of its own, because `app` already reaches any function.
+subtotals :: Query
+subtotals =
+  select'
+    ( cols [ "department", "active" ] <>
+        [ as countStar "headcount"
+        , as (app "GROUPING" [ col "department" ]) "is_total"
+        ]
+    )
+    # from "users"
+    # groupByRollup [ col "department", col "active" ]
+    # orderBy [ asc (col "department"), asc (col "active") ]
 
 -- #example window-functions
 -- # Window functions
@@ -534,6 +559,7 @@ cookbook =
   , { name: "join-using",           query: joinUsingExample }
   , { name: "natural-join",         query: naturalJoinExample }
   , { name: "aggregation",          query: aggregation }
+  , { name: "grouping-sets",        query: subtotals }
   , { name: "window-functions",     query: windowFunctions }
   , { name: "distinct",             query: distinctExample }
   , { name: "distinct-on",          query: distinctOnExample }

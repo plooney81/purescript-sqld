@@ -55,9 +55,9 @@ await pool.query(query.sql, query.params);
 ## Examples
 
 **[EXAMPLES.md](EXAMPLES.md)** is a worked cookbook — filtering, joins,
-aggregation, window functions, `DISTINCT ON`, subqueries, derived and lateral
-tables, common table expressions, composing fragments from optional parameters,
-and when to reach for `raw`.
+aggregation, grouping sets, window functions, `DISTINCT ON`, subqueries,
+derived and lateral tables, common table expressions, composing fragments from
+optional parameters, and when to reach for `raw`.
 
 It is generated from [`src/Example/Cookbook.purs`](src/Example/Cookbook.purs),
 and every example is replayed against a live PostgreSQL server by the
@@ -68,7 +68,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `Cte`, `SetOperation`, `Window`, `JoinType`, `JoinCondition`, `emptyQuery`, `emptyWindow`, `Keyword` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `JoinType`, `JoinCondition`, `emptyQuery`, `emptyWindow`, `Keyword` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
@@ -109,7 +109,11 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `intersect` / `intersectAll` | `:: Query -> Query -> Query` — the rows in both |
 | `except` / `exceptAll` | `:: Query -> Query -> Query` — the left query's rows, minus the right's |
 | `combine :: SetOp -> Boolean -> Query -> Query -> Query` | General form; any set operator, with or without `ALL` |
-| `groupBy :: Array Expr -> Query -> Query` | GROUP BY |
+| `groupBy :: Array Expr -> Query -> Query` | GROUP BY (appends, like `select`) |
+| `groupBySets :: Array (Array Expr) -> Query -> Query` | `GROUP BY GROUPING SETS ((…), …)` — one grouping per set named |
+| `groupByCube :: Array Expr -> Query -> Query` | `GROUP BY CUBE (…)` — every combination of the expressions |
+| `groupByRollup :: Array Expr -> Query -> Query` | `GROUP BY ROLLUP (…)` — every prefix: subtotals down one hierarchy |
+| `groupByElements :: Array GroupingElement -> Query -> Query` | General form; appends any grouping elements |
 | `having :: Expr -> Query -> Query` | HAVING |
 | `orderBy :: Array OrderExpr -> Query -> Query` | ORDER BY |
 | `limit :: Int -> Query -> Query` | LIMIT |
@@ -235,6 +239,51 @@ still reachable without falling back to `raw`:
 Common aggregates and functions are provided as one-line wrappers over `app`:
 `count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`,
 `upper`.
+
+### Grouping sets
+
+`groupBy` gives one level of detail. `GROUPING SETS`, `CUBE` and `ROLLUP` give
+several from one pass over the table — the groups, their subtotals, and the
+grand total, as extra rows of the same result:
+
+```purescript
+select' (cols ["department", "active"] <> [as countStar "headcount"])
+  # from "users"
+  # groupByRollup [col "department", col "active"]
+-- GROUP BY ROLLUP ("department", "active")
+--   -- groups by ("department", "active"), then ("department"), then ()
+
+select' (cols ["department"] <> [as countStar "headcount"])
+  # from "users"
+  # groupBySets [[col "department"], []]
+-- GROUP BY GROUPING SETS (("department"), ())
+```
+
+`ROLLUP (a, b)` groups by every prefix — `(a, b)`, `(a)`, `()` — which is the
+subtotals down one hierarchy: a country's cities, never a city across
+countries. `CUBE (a, b)` gives every combination instead, adding `(b)`.
+`groupBySets` names the groupings one by one, and `[]` among them is the empty
+grouping set, `()`: one group holding every row, which is the grand total.
+
+The clause is a list of elements rather than a flat list of expressions, so the
+plain and multi-grouping forms sit side by side as they do in SQL. All four
+builders append, so a later call adds to the clause rather than replacing it —
+the same thing `mergeQueries` has always done with `GROUP BY`:
+
+```purescript
+groupBy [col "department"] >>> groupByRollup [col "active"]
+-- GROUP BY "department", ROLLUP ("active")
+```
+
+A subtotal row carries `NULL` in the columns it rolled up, which is the same
+`NULL` a row missing that value carries. `GROUPING(…)` tells them apart — 1
+where the column was rolled up, 0 where it was grouped by — and needs no
+builder of its own, since `app "GROUPING" [col "department"]` reaches it.
+
+`groupBySets []`, `groupByCube []` and `groupByRollup []` add nothing:
+`CUBE ()` is not something PostgreSQL parses, and an empty list arises
+naturally when the grouping is driven by user input. `groupBySets [[]]` is the
+grand total, and is a different thing.
 
 ### Window functions
 

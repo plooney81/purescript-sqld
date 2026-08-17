@@ -261,6 +261,25 @@ data Distinct
   = Distinct
   | DistinctOn (Array Expr)
 
+-- | One element of a `GROUP BY` clause.
+-- |
+-- | A `GROUP BY` is a list of these rather than a flat list of expressions,
+-- | because SQL lets the forms sit side by side: `GROUP BY "a", ROLLUP ("b")`
+-- | is one clause of two elements, and only the first is a bare expression.
+-- |
+-- | `GroupingSets` names its groupings one by one — `Array (Array Expr)`, one
+-- | grouping per set, and the result holds every group of every set. The inner
+-- | array is what makes the empty grouping set `()` expressible, which is the
+-- | one group holding every row: the grand total. `Cube` and
+-- | `Rollup` are shorthands for two families of those sets: `ROLLUP (a, b)` is
+-- | `(a, b), (a), ()`, the subtotals down one hierarchy, and `CUBE (a, b)` adds
+-- | `(b)` — every combination rather than every prefix.
+data GroupingElement
+  = GroupingExpr Expr
+  | GroupingSets (Array (Array Expr))
+  | Cube (Array Expr)
+  | Rollup (Array Expr)
+
 -- | A `SELECT` statement.
 -- |
 -- | `setOp` is what makes a query a set operation rather than a single
@@ -278,7 +297,7 @@ type Query =
   , from     :: Maybe Relation
   , joins    :: Array Join
   , where_   :: Maybe Expr
-  , groupBy  :: Array Expr
+  , groupBy  :: Array GroupingElement
   , having   :: Maybe Expr
   , orderBy  :: Array OrderExpr
   , limit    :: Maybe Int
