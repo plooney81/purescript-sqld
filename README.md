@@ -285,6 +285,53 @@ builder of its own, since `app "GROUPING" [col "department"]` reaches it.
 naturally when the grouping is driven by user input. `groupBySets [[]]` is the
 grand total, and is a different thing.
 
+### Aggregate FILTER
+
+`filterWhere` restricts one aggregate to the rows its predicate keeps, while
+the aggregates beside it still see the whole group:
+
+```purescript
+select' (cols ["department"] <>
+          [ as (countStar `filterWhere` (col "active" .== bool true)) "active_count"
+          , as countStar "total"
+          ])
+  # from "users"
+  # groupBy [col "department"]
+-- SELECT "department",
+--        COUNT(*) FILTER (WHERE "active" = $1) AS "active_count",
+--        COUNT(*) AS "total"
+-- FROM "users" GROUP BY "department"
+```
+
+| Constructor | Example | SQL |
+|---|---|---|
+| `filterWhere :: Expr -> Expr -> Expr` | ``countStar `filterWhere` (col "active")`` | `COUNT(*) FILTER (WHERE "active")` |
+
+That is the conditional aggregate `SUM(CASE WHEN … THEN 1 ELSE 0 END)` spells
+the long way round: a `WHERE` clause would narrow every column of the query at
+once, where this narrows one and leaves its neighbours the whole group to
+count.
+
+`FILTER` binds to the aggregate call, so it is an atom the precedence printer
+never brackets — ``binOp "-" countStar (countStar `filterWhere` p)`` emits
+`COUNT(*) - COUNT(*) FILTER (WHERE …)` — and it precedes `OVER` when the two
+meet:
+
+```purescript
+(sum_ (col "total") `filterWhere` (col "status" .== str "paid"))
+  `over` partitionBy' [col "user_id"]
+-- SUM("total") FILTER (WHERE "status" = $1) OVER (PARTITION BY "user_id")
+```
+
+That is the order PostgreSQL's grammar fixes: the modifier belongs to the call,
+the window to what is done with its result. Writing the two the other way round
+builds and the database rejects it, as it does a `FILTER` on a scalar function
+— `App` covers every function in `pg_proc` and which of them aggregate is
+PostgreSQL's to say, so neither is a mistake the type can catch. Parameters in
+the predicate are numbered where the predicate is emitted, which in a select
+list is ahead of the `WHERE` clause's. `WITHIN GROUP`, the other aggregate
+modifier, is not supported.
+
 ### Window functions
 
 `over` evaluates an aggregate — or a window-only function such as `rowNumber`,

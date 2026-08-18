@@ -27,7 +27,7 @@ import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
 import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
-import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
@@ -408,6 +408,82 @@ handWritten =
         # from "users"
         # where_ (col "active" .== bool true)
         # groupByRollup [ coalesce [ col "department", str "unknown" ] ]
+    }
+
+  -- Aggregate FILTER -----------------------------------------------------------
+
+  -- The conditional count: one aggregate over the rows the predicate keeps and
+  -- one over the whole group, both from the single pass a `WHERE` clause would
+  -- have narrowed for all of them.
+  , { name: "aggregate-filter-count"
+    , query: select'
+        ( cols [ "department" ] <>
+            [ as (countStar `filterWhere` (col "active" .== bool true)) "active_count"
+            , as countStar "total"
+            ]
+        )
+        # from "users"
+        # groupBy [ col "department" ]
+    }
+
+  , { name: "aggregate-filter-sum"
+    , query: select'
+        ( cols [ "user_id" ] <>
+            [ as (sum_ (col "total") `filterWhere` (col "status" .== str "paid")) "paid_total" ]
+        )
+        # from "orders"
+        # groupBy [ col "user_id" ]
+    }
+
+  -- `FILTER` precedes `OVER`, which is the order PostgreSQL's grammar fixes:
+  -- the modifier belongs to the aggregate call and the window to what is done
+  -- with its result. Emitting the two the other way round would not parse, so
+  -- this entry is what holds the ordering.
+  , { name: "aggregate-filter-over"
+    , query: select'
+        ( cols [ "user_id", "total" ] <>
+            [ as
+                ( ( sum_ (col "total") `filterWhere` (col "status" .== str "paid")
+                  ) `over` partitionBy' [ col "user_id" ]
+                )
+                "paid_total"
+            ]
+        )
+        # from "orders"
+    }
+
+  -- A filtered aggregate is legal in `HAVING`, where it decides which groups
+  -- survive rather than what they report.
+  , { name: "aggregate-filter-having"
+    , query: select' (cols [ "department" ] <> [ as countStar "headcount" ])
+        # from "users"
+        # groupBy [ col "department" ]
+        # having ((countStar `filterWhere` (col "active" .== bool true)) .> int 1)
+    }
+
+  -- `FILTER` binds to the aggregate call, tighter than any operator, so the
+  -- subtraction around it brackets nothing — and PostgreSQL parses what we
+  -- emit.
+  , { name: "aggregate-filter-in-expression"
+    , query: select'
+        ( cols [ "department" ] <>
+            [ as
+                ( binOp "-" countStar
+                    (countStar `filterWhere` (col "active" .== bool true))
+                )
+                "inactive_count"
+            ]
+        )
+        # from "users"
+        # groupBy [ col "department" ]
+    }
+
+  -- The predicate's parameter sits in the select list, so it is numbered ahead
+  -- of the WHERE clause's.
+  , { name: "aggregate-filter-parameters"
+    , query: select' [ as (countStar `filterWhere` (col "age" .>= int 21)) "adults" ]
+        # from "users"
+        # where_ (col "active" .== bool true)
     }
 
   -- Ordering / pagination ----------------------------------------------------
@@ -1095,6 +1171,7 @@ exprTags e = case e of
   Or xs -> node (if Array.null xs then "Expr.Or.empty" else "Expr.Or") xs
   Between x lo hi -> node "Expr.Between" [ x, lo, hi ]
   Over f w -> ("Expr.Over" : exprTags f) <> windowTags w
+  Filter agg predicate -> node "Expr.Filter" [ agg, predicate ]
   Raw _ -> [ "Expr.Raw" ]
   where
   node tag kids = tag : Array.concatMap exprTags kids
@@ -1291,6 +1368,7 @@ requiredTags = Array.sort
   , "Expr.Or.empty"
   , "Expr.Between"
   , "Expr.Over"
+  , "Expr.Filter"
   , "Expr.Raw"
   , "Window.partitionBy"
   , "Window.orderBy"

@@ -23,7 +23,7 @@ import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
-import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
+import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
@@ -191,6 +191,32 @@ subtotals =
     # from "users"
     # groupByRollup [ col "department", col "active" ]
     # orderBy [ asc (col "department"), asc (col "active") ]
+
+-- #example aggregate-filter
+-- # Conditional aggregates with FILTER
+-- `filterWhere` restricts one aggregate to the rows its predicate keeps, while
+-- the aggregates beside it still see the whole group. So the subset and the
+-- total it came out of arrive together, from one pass over the table — where a
+-- `where_` would have narrowed every column at once, and the older
+-- `SUM(CASE WHEN … THEN 1 ELSE 0 END)` says the same thing at several times the
+-- length.
+--
+-- `FILTER` binds to the aggregate call itself. That makes it an atom needing no
+-- brackets in a larger expression, and it is why it precedes `OVER` when the
+-- two meet: the modifier belongs to the call, the window to what is done with
+-- its result.
+conditionalAggregates :: Query
+conditionalAggregates =
+  select'
+    ( cols [ "department" ] <>
+        [ as (countStar `filterWhere` (col "active" .== bool true)) "active_count"
+        , as countStar "headcount"
+        , as (avg (col "age") `filterWhere` (col "age" .>= int 21)) "mean_adult_age"
+        ]
+    )
+    # from "users"
+    # groupBy [ col "department" ]
+    # orderBy [ desc (col "active_count") ]
 
 -- #example window-functions
 -- # Window functions
@@ -560,6 +586,7 @@ cookbook =
   , { name: "natural-join",         query: naturalJoinExample }
   , { name: "aggregation",          query: aggregation }
   , { name: "grouping-sets",        query: subtotals }
+  , { name: "aggregate-filter",     query: conditionalAggregates }
   , { name: "window-functions",     query: windowFunctions }
   , { name: "distinct",             query: distinctExample }
   , { name: "distinct-on",          query: distinctOnExample }

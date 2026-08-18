@@ -346,8 +346,9 @@ formatOffset (Just n) = "OFFSET " <> show n
 -- `And` and `Or` are deliberately absent: they parenthesise themselves, so as
 -- far as the surrounding expression is concerned they are atoms. `Raw` is an
 -- atom too — its contents are opaque, so its parenthesisation is the caller's
--- responsibility. So is `Over`, which binds tighter in PostgreSQL than any
--- operator that could contain it.
+-- responsibility. So are `Over` and `Filter`, which bind to the function call
+-- itself and so tighter in PostgreSQL than any operator that could contain
+-- them.
 
 atomPrec :: Int
 atomPrec = 99
@@ -435,6 +436,14 @@ formatExpr layout (Over e w) state = Tuple (fnSql <> " OVER " <> windowSql) s2
   -- atom level: anything looser brackets itself.
   Tuple fnSql     s1 = formatChild layout atomPrec e state
   Tuple windowSql s2 = formatWindow layout w s1
+formatExpr layout (Filter e predicate) state =
+  Tuple (aggSql <> " FILTER (WHERE " <> predicateSql <> ")") s2
+  where
+  -- `FILTER` binds to the aggregate call, so its operand is formatted at atom
+  -- level for the same reason `OVER`'s is. The predicate is not: the brackets
+  -- around it are the modifier's own, and nothing outside them can reach in.
+  Tuple aggSql       s1 = formatChild layout atomPrec e state
+  Tuple predicateSql s2 = formatExpr layout predicate s1
 formatExpr _ (Raw sql) state = Tuple sql state
 
 -- ---------------------------------------------------------------------------

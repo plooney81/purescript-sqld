@@ -28,6 +28,7 @@ Regenerate with `make examples`.
 - [Natural joins](#natural-joins)
 - [Aggregation](#aggregation)
 - [Subtotals with ROLLUP, CUBE and GROUPING SETS](#subtotals-with-rollup-cube-and-grouping-sets)
+- [Conditional aggregates with FILTER](#conditional-aggregates-with-filter)
 - [Window functions](#window-functions)
 - [DISTINCT](#distinct)
 - [DISTINCT ON](#distinct-on)
@@ -380,6 +381,48 @@ ORDER BY "department" ASC, "active" ASC
 ```
 
 <sub>Parameterised: <code>SELECT "department", "active", COUNT(*) AS "headcount", GROUPING("department") AS "is_total" FROM "users" GROUP BY ROLLUP ("department", "active") ORDER BY "department" ASC, "active" ASC</code></sub>
+
+---
+
+## Conditional aggregates with FILTER
+
+`filterWhere` restricts one aggregate to the rows its predicate keeps, while
+the aggregates beside it still see the whole group. So the subset and the
+total it came out of arrive together, from one pass over the table — where a
+`where_` would have narrowed every column at once, and the older
+`SUM(CASE WHEN … THEN 1 ELSE 0 END)` says the same thing at several times the
+length.
+
+`FILTER` binds to the aggregate call itself. That makes it an atom needing no
+brackets in a larger expression, and it is why it precedes `OVER` when the
+two meet: the modifier belongs to the call, the window to what is done with
+its result.
+
+```purescript
+conditionalAggregates :: Query
+conditionalAggregates =
+  select'
+    ( cols [ "department" ] <>
+        [ as (countStar `filterWhere` (col "active" .== bool true)) "active_count"
+        , as countStar "headcount"
+        , as (avg (col "age") `filterWhere` (col "age" .>= int 21)) "mean_adult_age"
+        ]
+    )
+    # from "users"
+    # groupBy [ col "department" ]
+    # orderBy [ desc (col "active_count") ]
+```
+
+```sql
+SELECT "department", COUNT(*) FILTER (WHERE "active" = TRUE) AS "active_count", COUNT(*) AS "headcount", AVG("age") FILTER (WHERE "age" >= 21) AS "mean_adult_age"
+FROM "users"
+GROUP BY "department"
+ORDER BY "active_count" DESC
+```
+
+Bound parameters: `$1` = `true`, `$2` = `21`
+
+<sub>Parameterised: <code>SELECT "department", COUNT(*) FILTER (WHERE "active" = $1) AS "active_count", COUNT(*) AS "headcount", AVG("age") FILTER (WHERE "age" >= $2) AS "mean_adult_age" FROM "users" GROUP BY "department" ORDER BY "active_count" DESC</code></sub>
 
 ---
 
