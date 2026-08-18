@@ -26,9 +26,9 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), Join, JoinCondition(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -347,6 +347,67 @@ handWritten =
         # groupBy [ col "department" ]
         # having (raw "COUNT(*)" .> int 5)
         # orderBy [ desc (col "headcount") ]
+    }
+
+  -- PostgreSQL requires every select-list column to appear in some grouping
+  -- set, so these entries are a check on the bracketing as much as on the
+  -- keyword: a set that swallowed its neighbour would group by the wrong
+  -- columns and be rejected.
+  , { name: "group-by-grouping-sets"
+    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+        # from "users"
+        # groupBySets
+            [ [ col "department" ]
+            , [ col "department", col "active" ]
+            , []
+            ]
+    }
+
+  , { name: "group-by-rollup"
+    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+        # from "users"
+        # groupByRollup [ col "department", col "active" ]
+    }
+
+  , { name: "group-by-cube"
+    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+        # from "users"
+        # groupByCube [ col "department", col "active" ]
+    }
+
+  -- A plain grouping and a ROLLUP in the one clause: `GROUP BY "department",
+  -- ROLLUP ("active")`, which is what making `groupBy` additive buys.
+  , { name: "group-by-plain-and-rollup"
+    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+        # from "users"
+        # groupBy [ col "department" ]
+        # groupByRollup [ col "active" ]
+    }
+
+  -- `GROUPING(…)` is what tells a subtotal row apart from a real NULL in the
+  -- data: it is 1 where the column was rolled up and 0 where it was grouped by.
+  -- No builder of its own — the generic `app` node already reaches it.
+  , { name: "group-by-grouping-function"
+    , query: select'
+        ( cols [ "department" ] <>
+            [ as (app "GROUPING" [ col "department" ]) "is_total"
+            , as countStar "headcount"
+            ]
+        )
+        # from "users"
+        # groupByRollup [ col "department" ]
+    }
+
+  -- A grouping element carrying a parameter: the WHERE clause's is numbered
+  -- first because it is emitted first, the ROLLUP's second. Only aggregates are
+  -- selected, so the grouped expression need not be repeated in the select list
+  -- — where it would carry a different parameter number and PostgreSQL, which
+  -- matches the two as written, would reject the query.
+  , { name: "group-by-rollup-parameters"
+    , query: select' [ as countStar "headcount" ]
+        # from "users"
+        # where_ (col "active" .== bool true)
+        # groupByRollup [ coalesce [ col "department", str "unknown" ] ]
     }
 
   -- Ordering / pagination ----------------------------------------------------
@@ -1072,6 +1133,20 @@ frameBoundTag = case _ of
   Following _ -> "FrameBound.Following"
   UnboundedFollowing -> "FrameBound.UnboundedFollowing"
 
+-- | Each `GROUP BY` form is tagged apart, so the ratchet holds the plain,
+-- | `GROUPING SETS`, `CUBE` and `ROLLUP` spellings each to a corpus entry of its
+-- | own — and the empty grouping set apart from a populated one, since `()` is
+-- | the bracketing the formatter is easiest to get wrong.
+groupingTags :: GroupingElement -> Array String
+groupingTags g = case g of
+  GroupingExpr e -> "GroupingElement.GroupingExpr" : exprTags e
+  GroupingSets sets -> "GroupingElement.GroupingSets" : Array.concatMap setTags sets
+  Cube es -> "GroupingElement.Cube" : Array.concatMap exprTags es
+  Rollup es -> "GroupingElement.Rollup" : Array.concatMap exprTags es
+  where
+  setTags [] = [ "GroupingElement.GroupingSets.empty" ]
+  setTags es = Array.concatMap exprTags es
+
 distinctTags :: Distinct -> Array String
 distinctTags = case _ of
   Distinct -> [ "Query.distinct" ]
@@ -1159,7 +1234,7 @@ queryTags q =
     <> foldClause "Query.from" (map (relationTags "Query.from") q.from)
     <> Array.concatMap joinTags q.joins
     <> foldClause "Query.where" (map exprTags q.where_)
-    <> clause "Query.groupBy" (Array.concatMap exprTags q.groupBy) (Array.null q.groupBy)
+    <> clause "Query.groupBy" (Array.concatMap groupingTags q.groupBy) (Array.null q.groupBy)
     <> foldClause "Query.having" (map exprTags q.having)
     <> clause "Query.orderBy" (Array.concatMap orderTags q.orderBy) (Array.null q.orderBy)
     <> foldClause "Query.limit" (map (const []) q.limit)
@@ -1270,6 +1345,11 @@ requiredTags = Array.sort
   , "Query.from.lateral"
   , "Query.where"
   , "Query.groupBy"
+  , "GroupingElement.GroupingExpr"
+  , "GroupingElement.GroupingSets"
+  , "GroupingElement.GroupingSets.empty"
+  , "GroupingElement.Cube"
+  , "GroupingElement.Rollup"
   , "Query.having"
   , "Query.orderBy"
   , "Query.limit"

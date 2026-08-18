@@ -27,6 +27,7 @@ Regenerate with `make examples`.
 - [Joining on shared column names](#joining-on-shared-column-names)
 - [Natural joins](#natural-joins)
 - [Aggregation](#aggregation)
+- [Subtotals with ROLLUP, CUBE and GROUPING SETS](#subtotals-with-rollup-cube-and-grouping-sets)
 - [Window functions](#window-functions)
 - [DISTINCT](#distinct)
 - [DISTINCT ON](#distinct-on)
@@ -340,6 +341,45 @@ ORDER BY "headcount" DESC
 Bound parameters: `$1` = `true`, `$2` = `3`
 
 <sub>Parameterised: <code>SELECT "department", COUNT(*) AS "headcount", COUNT("email") AS "with_email", AVG("age") AS "mean_age" FROM "users" WHERE "active" = $1 GROUP BY "department" HAVING COUNT(*) > $2 ORDER BY "headcount" DESC</code></sub>
+
+---
+
+## Subtotals with ROLLUP, CUBE and GROUPING SETS
+
+A plain `groupBy` gives one level of detail. `groupByRollup` gives every
+prefix of its expressions — `(department, active)`, then `(department)`, then
+`()` — so the groups, the per-department subtotals and the grand total all
+come back from one pass over the table. `groupByCube` gives every combination
+rather than every prefix, and `groupBySets` names the groupings one by one,
+where `[]` is that grand total.
+
+A subtotal row carries `NULL` in the columns it rolled up, which is the same
+`NULL` a user with no department has. `GROUPING(…)` tells the two apart: 1
+where the column was rolled up, 0 where it was grouped by. It needs no
+builder of its own, because `app` already reaches any function.
+
+```purescript
+subtotals :: Query
+subtotals =
+  select'
+    ( cols [ "department", "active" ] <>
+        [ as countStar "headcount"
+        , as (app "GROUPING" [ col "department" ]) "is_total"
+        ]
+    )
+    # from "users"
+    # groupByRollup [ col "department", col "active" ]
+    # orderBy [ asc (col "department"), asc (col "active") ]
+```
+
+```sql
+SELECT "department", "active", COUNT(*) AS "headcount", GROUPING("department") AS "is_total"
+FROM "users"
+GROUP BY ROLLUP ("department", "active")
+ORDER BY "department" ASC, "active" ASC
+```
+
+<sub>Parameterised: <code>SELECT "department", "active", COUNT(*) AS "headcount", GROUPING("department") AS "is_total" FROM "users" GROUP BY ROLLUP ("department", "active") ORDER BY "department" ASC, "active" ASC</code></sub>
 
 ---
 

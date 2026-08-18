@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, Join, JoinCondition(..), Literal(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
+import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Join, JoinCondition(..), Literal(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -285,11 +285,29 @@ formatWhere layout (Just e) state = Tuple ("WHERE " <> sql) s'
   where
   Tuple sql s' = formatExpr layout e state
 
-formatGroupBy :: Layout -> Array Expr -> WithBindings String
+formatGroupBy :: Layout -> Array GroupingElement -> WithBindings String
 formatGroupBy _ [] state = Tuple mempty state
-formatGroupBy layout exprs state = Tuple ("GROUP BY " <> intercalate ", " parts) s'
+formatGroupBy layout elements state = Tuple ("GROUP BY " <> intercalate ", " parts) s'
   where
-  Tuple parts s' = mapAccum (formatExpr layout) state exprs
+  Tuple parts s' = mapAccum (formatGroupingElement layout) state elements
+
+-- | One element of a `GROUP BY` list.
+-- |
+-- | `GROUPING SETS` brackets each of its sets, which is what gives the empty set
+-- | somewhere to be written: `GROUPING SETS (("a"), ())`. `CUBE` and `ROLLUP`
+-- | bracket a single list apiece.
+formatGroupingElement :: Layout -> GroupingElement -> WithBindings String
+formatGroupingElement layout (GroupingExpr e) state = formatExpr layout e state
+formatGroupingElement layout (GroupingSets sets) state =
+  Tuple ("GROUPING SETS (" <> intercalate ", " parts <> ")") s'
+  where
+  Tuple parts s' = mapAccum (formatExprList layout) state sets
+formatGroupingElement layout (Cube exprs) state = Tuple ("CUBE " <> sql) s'
+  where
+  Tuple sql s' = formatExprList layout exprs state
+formatGroupingElement layout (Rollup exprs) state = Tuple ("ROLLUP " <> sql) s'
+  where
+  Tuple sql s' = formatExprList layout exprs state
 
 formatHaving :: Layout -> Maybe Expr -> WithBindings String
 formatHaving _ Nothing       state = Tuple mempty state
@@ -391,9 +409,7 @@ formatExpr layout (Postfix op e) state = Tuple (sql <> " " <> op) s'
 formatExpr layout (Cast e ty) state = Tuple (sql <> "::" <> ty) s'
   where
   Tuple sql s' = formatChild layout 12 e state
-formatExpr layout (Row exprs) state = Tuple ("(" <> intercalate ", " parts <> ")") s'
-  where
-  Tuple parts s' = mapAccum (formatExpr layout) state exprs
+formatExpr layout (Row exprs) state = formatExprList layout exprs state
 formatExpr layout (Sub q) state = Tuple (parenthesise layout sql) s'
   where
   -- A nested SELECT is laid out like the query containing it, one level deeper:
@@ -457,6 +473,15 @@ formatFrame { mode, start, end } = keyword mode <> " " <> boundsSql
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
+
+-- | A bracketed, comma-separated list of expressions: the `(a, b)` of a row
+-- | constructor, of `CUBE`, and of one grouping set. An empty list gives `()`,
+-- | which is a row of no columns in the first case and the grand total in the
+-- | others.
+formatExprList :: Layout -> Array Expr -> WithBindings String
+formatExprList layout exprs state = Tuple ("(" <> intercalate ", " parts <> ")") s'
+  where
+  Tuple parts s' = mapAccum (formatExpr layout) state exprs
 
 -- | Formats a sub-expression, parenthesising it only if it binds more loosely
 -- | than its position allows.

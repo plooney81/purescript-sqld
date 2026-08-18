@@ -622,6 +622,69 @@ selectSpec = describe "Sqld.Select" do
       query `shouldEqual`
         "SELECT \"department\", COUNT(*) AS \"headcount\" FROM \"employees\" GROUP BY \"department\" HAVING COUNT(*) > 5 ORDER BY \"headcount\" DESC"
 
+    it "calling groupBy twice accumulates" do
+      let query = select' [star]
+            # from "users"
+            # groupBy [col "department"]
+            # groupBy [col "active"]
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" GROUP BY \"department\", \"active\""
+
+    it "GROUPING SETS" do
+      let query = select' [star]
+            # from "users"
+            # groupBySets [[col "department"], [col "department", col "active"]]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" GROUP BY GROUPING SETS ((\"department\"), (\"department\", \"active\"))"
+
+    it "the empty grouping set is the grand total" do
+      let query = select' [star]
+            # from "users"
+            # groupBySets [[col "department"], []]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" GROUP BY GROUPING SETS ((\"department\"), ())"
+
+    it "ROLLUP" do
+      let query = select' [star]
+            # from "users"
+            # groupByRollup [col "department", col "active"]
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" GROUP BY ROLLUP (\"department\", \"active\")"
+
+    it "CUBE" do
+      let query = select' [star]
+            # from "users"
+            # groupByCube [col "department", col "active"]
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" GROUP BY CUBE (\"department\", \"active\")"
+
+    it "a plain grouping and a ROLLUP share one clause" do
+      let query = select' [star]
+            # from "users"
+            # groupBy [col "department"]
+            # groupByRollup [col "active"]
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" GROUP BY \"department\", ROLLUP (\"active\")"
+
+    -- `GROUPING SETS ()`, `CUBE ()` and `ROLLUP ()` are not SQL PostgreSQL
+    -- parses, and an empty list arises naturally when the grouping is driven by
+    -- user input.
+    it "an empty grouping adds nothing" do
+      let base = select' [star] # from "users"
+          query = base # groupBySets [] # groupByCube [] # groupByRollup [] # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\""
+
+    it "numbers a grouping element's parameters after the WHERE clause's" do
+      let query = format $ select' [as countStar "headcount"]
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # groupByRollup [coalesce [col "department", str "unknown"]]
+      query.sql `shouldEqual`
+        "SELECT COUNT(*) AS \"headcount\" FROM \"users\" WHERE \"active\" = $1 GROUP BY ROLLUP (COALESCE(\"department\", $2))"
+      query.params `shouldEqual` [LitBoolean true, LitString "unknown"]
+
   describe "ORDER BY / LIMIT / OFFSET" do
     it "ORDER BY ASC" do
       let query = select' [star]
