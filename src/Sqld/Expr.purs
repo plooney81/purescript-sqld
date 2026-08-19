@@ -234,6 +234,34 @@ upper :: Expr -> Expr
 upper e = App "UPPER" [ e ]
 
 -- ---------------------------------------------------------------------------
+-- Aggregate FILTER
+-- ---------------------------------------------------------------------------
+
+-- | Restricts an aggregate to the rows its predicate keeps:
+-- |
+-- |     countStar `filterWhere` (col "active" .== bool true)
+-- |     -- COUNT(*) FILTER (WHERE "active" = $1)
+-- |
+-- | which is the conditional aggregate that
+-- | `SUM(CASE WHEN … THEN 1 ELSE 0 END)` spells the long way round. Several of
+-- | them beside one another count different subsets of the same group, and an
+-- | unfiltered aggregate beside them counts the whole of it.
+-- |
+-- | `FILTER` binds to the aggregate call, so it renders as an atom, and it
+-- | composes with `over` in one direction only:
+-- |
+-- |     (sum_ (col "total") `filterWhere` (col "status" .== str "paid"))
+-- |       `over` partitionBy' [ col "user_id" ]
+-- |     -- SUM("total") FILTER (WHERE "status" = $1) OVER (PARTITION BY "user_id")
+-- |
+-- | which is the order PostgreSQL's grammar fixes. The other way round builds
+-- | and the database rejects it, as it does a `FILTER` on a scalar function —
+-- | neither is a mistake the type can catch, since an aggregate is an ordinary
+-- | `App`.
+filterWhere :: Expr -> Expr -> Expr
+filterWhere = Filter
+
+-- ---------------------------------------------------------------------------
 -- Window functions
 -- ---------------------------------------------------------------------------
 

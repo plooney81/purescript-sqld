@@ -63,6 +63,15 @@ data Expr
   -- | A window function and the window it is evaluated over:
   -- | `f(…) OVER (PARTITION BY … ORDER BY … <frame>)`.
   | Over Expr Window
+  -- | An aggregate and the rows it is allowed to see:
+  -- | `COUNT(*) FILTER (WHERE "active")`.
+  -- |
+  -- | Two `Expr`s rather than an aggregate and a predicate, because the AST has
+  -- | no aggregate of its own: `App` covers every function in `pg_proc`, and
+  -- | which of them aggregate is PostgreSQL's to say. A `FILTER` on a scalar
+  -- | function is therefore expressible, and it is the database that rejects
+  -- | it.
+  | Filter Expr Expr
   | Raw String
 
 data Literal

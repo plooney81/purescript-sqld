@@ -1,10 +1,10 @@
 module Test.Sqld.ExprSpec where
 
-import Prelude (Unit, discard, (#))
+import Prelude (Unit, discard, (#), (<>))
 import Sqld.Core (FrameMode(..), Literal(..), emptyWindow)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, orderWindow, orderWindow', over, partitionBy, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.==), (.>), (.>=))
+import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, filterWhere, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, orderWindow, orderWindow', over, partitionBy, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.==), (.>), (.>=))
 import Sqld.Format (format, formatInline)
-import Sqld.Select (as, asc, cols, desc, expr, from, orderBy, select', star, where_)
+import Sqld.Select (as, asc, cols, desc, expr, from, groupBy, having, orderBy, select', star, where_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -440,3 +440,79 @@ exprSpec = describe "Sqld.Expr" do
       result.sql `shouldEqual`
         "SELECT COUNT(*) OVER (PARTITION BY COALESCE(\"department\", $1)) AS \"headcount\" FROM \"users\" WHERE \"active\" = $2"
       result.params `shouldEqual` [LitString "unknown", LitBoolean true]
+
+  describe "aggregate FILTER" do
+    it "restricts an aggregate to the rows the predicate keeps" do
+      let result = select' (cols ["department"] <>
+                             [as (countStar `filterWhere` (col "active" .== bool true)) "active_count"])
+            # from "users"
+            # groupBy [col "department"]
+            # format
+      result.sql `shouldEqual`
+        "SELECT \"department\", COUNT(*) FILTER (WHERE \"active\" = $1) AS \"active_count\" FROM \"users\" GROUP BY \"department\""
+      result.params `shouldEqual` [LitBoolean true]
+
+    -- Filtered and unfiltered aggregates side by side is the whole point: the
+    -- subset and the group it came from, out of one pass.
+    it "sits beside an unfiltered aggregate" do
+      let query = select' (cols ["department"] <>
+                            [ as (countStar `filterWhere` (col "active" .== bool true)) "active_count"
+                            , as countStar "total"
+                            ])
+            # from "users"
+            # groupBy [col "department"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"department\", COUNT(*) FILTER (WHERE \"active\" = TRUE) AS \"active_count\", COUNT(*) AS \"total\" FROM \"users\" GROUP BY \"department\""
+
+    -- A compound predicate brackets itself, inside the brackets FILTER supplies.
+    it "an AND predicate keeps its own brackets" do
+      let query = select' [as (sum_ (col "total") `filterWhere`
+                                 and [col "status" .== str "paid", col "total" .> int 100])
+                             "big_paid"]
+            # from "orders"
+            # formatInline
+      query `shouldEqual`
+        "SELECT SUM(\"total\") FILTER (WHERE (\"status\" = 'paid' AND \"total\" > 100)) AS \"big_paid\" FROM \"orders\""
+
+    -- FILTER belongs to the aggregate call and OVER to what is done with its
+    -- result, so the two appear in that order — the only one PostgreSQL parses.
+    it "composes with over, FILTER before OVER" do
+      let query = select' [as ((sum_ (col "total") `filterWhere` (col "status" .== str "paid"))
+                                 `over` partitionBy' [col "user_id"])
+                             "paid_total"]
+            # from "orders"
+            # formatInline
+      query `shouldEqual`
+        "SELECT SUM(\"total\") FILTER (WHERE \"status\" = 'paid') OVER (PARTITION BY \"user_id\") AS \"paid_total\" FROM \"orders\""
+
+    -- FILTER binds to the call, tighter than any operator, so it is an atom
+    -- that the arithmetic around it never brackets.
+    it "binds tighter than an operator" do
+      let query = select' [as (binOp "-" countStar
+                                 (countStar `filterWhere` (col "active" .== bool true)))
+                             "inactive_count"]
+            # from "users"
+            # formatInline
+      query `shouldEqual`
+        "SELECT COUNT(*) - COUNT(*) FILTER (WHERE \"active\" = TRUE) AS \"inactive_count\" FROM \"users\""
+
+    -- The predicate is in the select list, so its parameters are numbered
+    -- before the WHERE clause's.
+    it "numbers the predicate's parameters in emitted order" do
+      let result = select' [as (countStar `filterWhere` (col "age" .>= int 21)) "adults"]
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # format
+      result.sql `shouldEqual`
+        "SELECT COUNT(*) FILTER (WHERE \"age\" >= $1) AS \"adults\" FROM \"users\" WHERE \"active\" = $2"
+      result.params `shouldEqual` [LitInt 21, LitBoolean true]
+
+    it "is legal in HAVING" do
+      let query = select' (cols ["department"] <> [as countStar "headcount"])
+            # from "users"
+            # groupBy [col "department"]
+            # having ((countStar `filterWhere` (col "active" .== bool true)) .> int 1)
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"department\", COUNT(*) AS \"headcount\" FROM \"users\" GROUP BY \"department\" HAVING COUNT(*) FILTER (WHERE \"active\" = TRUE) > 1"
