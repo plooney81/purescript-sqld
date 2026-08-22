@@ -24,7 +24,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
 import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', star, starFrom, tcols, unionAll, where_, withCte, with_)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', skipLocked, star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -517,6 +517,22 @@ pagination =
     # orderBy [ desc (col "published_at"), asc (col "id") ]
     # paginate 20 2
 
+-- #example work-queue
+-- # Claiming work from a queue
+-- `FOR UPDATE` locks the rows this transaction reads; `SKIP LOCKED` steps over
+-- the ones another worker already holds instead of waiting behind them. Two
+-- workers running this at once therefore claim disjoint batches. The clause is
+-- emitted last, after `LIMIT`, which is the only place SQL accepts it.
+workQueue :: Query
+workQueue =
+  select' (cols [ "id", "total" ])
+    # from "orders"
+    # where_ (col "status" .== str "pending")
+    # orderBy [ asc (col "placed_at") ]
+    # limit 10
+    # forUpdate
+    # skipLocked
+
 -- #example composing-fragments
 -- # Composing fragments
 -- The real payoff: named fragments compose with `>>>`, and optional filters
@@ -602,6 +618,7 @@ cookbook =
   , { name: "common-table-expressions", query: commonTableExpressions }
   , { name: "recursive-cte",        query: recursiveCte }
   , { name: "pagination",           query: pagination }
+  , { name: "work-queue",           query: workQueue }
   , { name: "composing-fragments",  query: composingFragments }
   , { name: "merging-queries",      query: mergingQueries }
   , { name: "raw-escape-hatch",     query: rawEscapeHatch }

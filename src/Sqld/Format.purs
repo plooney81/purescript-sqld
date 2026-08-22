@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Join, JoinCondition(..), Literal(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
+import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Join, JoinCondition(..), Literal(..), Locking, OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -113,11 +113,12 @@ formatQuery layout q state0 = Tuple sql s3
   Tuple bodySql    s2 = formatBody    layout q         s1
   Tuple orderBySql s3 = formatOrderBy layout q.orderBy s2
 
-  limitSql  = formatLimit  q.limit
-  offsetSql = formatOffset q.offset
+  limitSql   = formatLimit   q.limit
+  offsetSql  = formatOffset  q.offset
+  lockingSql = formatLocking layout q.locking
 
   parts = Array.filter (_ /= mempty)
-    [ withSql, bodySql, orderBySql, limitSql, offsetSql ]
+    [ withSql, bodySql, orderBySql, limitSql, offsetSql, lockingSql ]
 
   sql = intercalate (clauseSep layout) parts
 
@@ -335,6 +336,25 @@ formatLimit (Just n) = "LIMIT " <> show n
 formatOffset :: Maybe Int -> String
 formatOffset Nothing  = mempty
 formatOffset (Just n) = "OFFSET " <> show n
+
+-- | The locking clauses, last of all — after `LIMIT` and `OFFSET`, which is
+-- | where SQL puts them. Each is a clause in its own right, so a pretty layout
+-- | gives each its own line.
+-- |
+-- | Carries no bindings: a locking clause holds nothing but keywords and the
+-- | names of relations already named in `FROM`, so there is nothing here to
+-- | parameterise.
+formatLocking :: Layout -> Array Locking -> String
+formatLocking layout ls = intercalate (clauseSep layout) (map formatLock ls)
+
+formatLock :: Locking -> String
+formatLock { strength, tables, wait } = intercalate " " (Array.filter (_ /= mempty) parts)
+  where
+  parts = [ keyword strength, ofSql, maybe mempty keyword wait ]
+
+  ofSql =
+    if Array.null tables then mempty
+    else "OF " <> intercalate ", " (map quoteIdent tables)
 
 -- ---------------------------------------------------------------------------
 -- Operator precedence

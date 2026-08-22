@@ -289,6 +289,56 @@ data GroupingElement
   | Cube (Array Expr)
   | Rollup (Array Expr)
 
+-- | How strongly `FOR UPDATE` and its kin lock the rows a `SELECT` returns.
+-- |
+-- | `ForUpdate` is the strongest: the rows are locked as if for `UPDATE` or
+-- | `DELETE`, and no other transaction may lock, modify or delete them.
+-- | `ForNoKeyUpdate` is weaker only in that it does not block a `FOR KEY SHARE`
+-- | — which is the lock a foreign key reference takes — so a child row may
+-- | still be inserted against a parent locked this way. `ForShare` and
+-- | `ForKeyShare` are the shared counterparts of the two: several transactions
+-- | may hold them at once, and they block writers rather than each other.
+data LockStrength
+  = ForUpdate
+  | ForNoKeyUpdate
+  | ForShare
+  | ForKeyShare
+
+instance Keyword LockStrength where
+  keyword ForUpdate      = "FOR UPDATE"
+  keyword ForNoKeyUpdate = "FOR NO KEY UPDATE"
+  keyword ForShare       = "FOR SHARE"
+  keyword ForKeyShare    = "FOR KEY SHARE"
+
+-- | What a locking clause does when a row it wants is already locked.
+-- |
+-- | Absent, it waits. `NoWait` raises an error instead, and `SkipLocked` leaves
+-- | the row out of the result — which is what makes a work queue work, since
+-- | each worker then claims rows no other worker holds rather than queueing
+-- | behind them.
+-- |
+-- | One field rather than two flags, because SQL admits one or the other and
+-- | never both.
+data LockWait
+  = NoWait
+  | SkipLocked
+
+instance Keyword LockWait where
+  keyword NoWait     = "NOWAIT"
+  keyword SkipLocked = "SKIP LOCKED"
+
+-- | One locking clause: `FOR UPDATE OF "orders" SKIP LOCKED`.
+-- |
+-- | `tables` is the optional `OF` list, naming which of the query's `FROM`
+-- | items the clause applies to; empty locks every one of them. They are the
+-- | names — or aliases — those items go by, so they are identifiers and are
+-- | quoted as such rather than bound.
+type Locking =
+  { strength :: LockStrength
+  , tables   :: Array String
+  , wait     :: Maybe LockWait
+  }
+
 -- | A `SELECT` statement.
 -- |
 -- | `setOp` is what makes a query a set operation rather than a single
@@ -298,6 +348,14 @@ data GroupingElement
 -- | to the combined result. The `Sqld.Select` builders start such a query from
 -- | `emptyQuery`, so the unused fields stay empty — applying `select` or `from`
 -- | to a set operation afterwards has no effect on the SQL.
+-- |
+-- | `locking` is emitted last, after `LIMIT` and `OFFSET`, which is where SQL
+-- | puts it. It is a list because SQL allows more than one clause — `FOR UPDATE
+-- | OF "a" FOR SHARE OF "b"` locks two relations two ways — and each entry
+-- | stands on its own. PostgreSQL rejects a locking clause on a query that also
+-- | uses `DISTINCT`, `GROUP BY`, `HAVING`, a window function or a set
+-- | operation, since none of those return rows a lock could be placed on; that
+-- | is a rule it enforces itself rather than one this type expresses.
 type Query =
   { with     :: Array Cte
   , setOp    :: Maybe SetOperation
@@ -311,6 +369,7 @@ type Query =
   , orderBy  :: Array OrderExpr
   , limit    :: Maybe Int
   , offset   :: Maybe Int
+  , locking  :: Array Locking
   }
 
 emptyQuery :: Query
@@ -327,6 +386,7 @@ emptyQuery =
   , orderBy:  []
   , limit:    Nothing
   , offset:   Nothing
+  , locking:  []
   }
 
 type FormattedQuery =

@@ -23,12 +23,12 @@ module Test.Sqld.Corpus
 import Prelude hiding (between, not, sub)
 
 import Data.Array ((:))
-import Data.Array (concatMap, difference, nub, null, sort) as Array
-import Data.Maybe (Maybe(..), isJust)
+import Data.Array (concatMap, difference, length, nub, null, sort) as Array
+import Data.Maybe (Maybe(..), isJust, maybe)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
 import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, naturalJoin, offset, orderBy, rightJoin, select', star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, lockOf, naturalJoin, noWait, offset, orderBy, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -504,6 +504,87 @@ handWritten =
         # orderBy [ desc (col "published_at") ]
         # limit 10
         # offset 20
+    }
+
+  -- Row locking ---------------------------------------------------------------
+
+  -- The locking clause is emitted last, after LIMIT and OFFSET. PREPARE runs
+  -- full parse analysis, so an entry misplacing it fails here — and PostgreSQL
+  -- checks more than placement: it rejects a locking clause alongside DISTINCT,
+  -- GROUP BY, HAVING, a window function or a set operation, which is why every
+  -- entry below is a plain row-returning SELECT.
+
+  , { name: "for-update"
+    , query: select' [ star ]
+        # from "orders"
+        # where_ (col "status" .== str "pending")
+        # forUpdate
+    }
+
+  -- The work queue: `LIMIT … FOR UPDATE SKIP LOCKED` hands each worker the
+  -- first rows no other worker holds, rather than making it wait behind them.
+  , { name: "for-update-skip-locked"
+    , query: select' (cols [ "id", "total" ])
+        # from "orders"
+        # where_ (col "status" .== str "pending")
+        # orderBy [ asc (col "placed_at") ]
+        # limit 10
+        # forUpdate
+        # skipLocked
+    }
+
+  , { name: "for-update-nowait"
+    , query: select' [ star ] # from "orders" # forUpdate # noWait
+    }
+
+  , { name: "for-no-key-update"
+    , query: select' [ star ] # from "users" # forNoKeyUpdate
+    }
+
+  , { name: "for-share"
+    , query: select' [ star ] # from "users" # forShare
+    }
+
+  , { name: "for-key-share"
+    , query: select' [ star ] # from "users" # forKeyShare
+    }
+
+  -- `OF` names FROM items by the name they go by in the query, so this locks
+  -- the orders and leaves the users it joins untouched. PostgreSQL rejects a
+  -- name that is not in the FROM list — and rejects the table name of an
+  -- aliased relation — so the quoting of the alias is what this entry holds.
+  , { name: "for-update-of"
+    , query: select' [ starFrom "o" ]
+        # fromAs "orders" "o"
+        # innerJoin "users" (tcol "o" "user_id" .== tcol "users" "id")
+        # forUpdate
+        # lockOf [ "o" ]
+    }
+
+  -- Two clauses at once, which is the whole reason `locking` is a list: the
+  -- order is locked for writing while the user it belongs to is merely held
+  -- against change.
+  , { name: "for-update-of-and-for-share-of"
+    , query: select' [ star ]
+        # from "orders"
+        # innerJoin "users" (tcol "orders" "user_id" .== tcol "users" "id")
+        # forUpdate
+        # lockOf [ "orders" ]
+        # forShare
+        # lockOf [ "users" ]
+    }
+
+  -- A locking clause carries no parameters of its own, so the WHERE clause's
+  -- keep the numbers they would have had without it — which is what this entry
+  -- is here to confirm.
+  , { name: "for-update-after-parameters"
+    , query: select' (cols [ "id" ])
+        # from "orders"
+        # where_ (and [ col "status" .== str "pending", col "total" .> num 10.0 ])
+        # limit 5
+        # offset 5
+        # forUpdate
+        # skipLocked
     }
 
   -- Everything at once -------------------------------------------------------
@@ -1293,6 +1374,34 @@ setOperationTags (SetOperation so) =
   where
   tag = setOpTag so.op
 
+lockStrengthTag :: LockStrength -> String
+lockStrengthTag = case _ of
+  ForUpdate -> "LockStrength.ForUpdate"
+  ForNoKeyUpdate -> "LockStrength.ForNoKeyUpdate"
+  ForShare -> "LockStrength.ForShare"
+  ForKeyShare -> "LockStrength.ForKeyShare"
+
+lockWaitTag :: LockWait -> String
+lockWaitTag = case _ of
+  NoWait -> "LockWait.NoWait"
+  SkipLocked -> "LockWait.SkipLocked"
+
+lockingTags :: Locking -> Array String
+lockingTags l =
+  lockStrengthTag l.strength
+    : (if Array.null l.tables then [] else [ "Query.locking.of" ])
+    <> maybe [] (\w -> [ lockWaitTag w ]) l.wait
+
+-- | More than one locking clause is tagged apart from a single one, so the
+-- | ratchet holds the multi-clause form to a corpus entry of its own — the SQL
+-- | it emits is a second `FOR …` after the first, which nothing else exercises.
+lockingClauseTags :: Array Locking -> Array String
+lockingClauseTags [] = []
+lockingClauseTags ls =
+  "Query.locking"
+    : (if Array.length ls > 1 then [ "Query.locking.multiple" ] else [])
+    <> Array.concatMap lockingTags ls
+
 cteTags :: Cte -> Array String
 cteTags (Cte c) =
   [ "Query.with" ]
@@ -1316,6 +1425,7 @@ queryTags q =
     <> clause "Query.orderBy" (Array.concatMap orderTags q.orderBy) (Array.null q.orderBy)
     <> foldClause "Query.limit" (map (const []) q.limit)
     <> foldClause "Query.offset" (map (const []) q.offset)
+    <> lockingClauseTags q.locking
   where
   foldClause tag = case _ of
     Nothing -> []
@@ -1432,6 +1542,15 @@ requiredTags = Array.sort
   , "Query.orderBy"
   , "Query.limit"
   , "Query.offset"
+  , "Query.locking"
+  , "Query.locking.of"
+  , "Query.locking.multiple"
+  , "LockStrength.ForUpdate"
+  , "LockStrength.ForNoKeyUpdate"
+  , "LockStrength.ForShare"
+  , "LockStrength.ForKeyShare"
+  , "LockWait.NoWait"
+  , "LockWait.SkipLocked"
   ]
 
 -- | Required tags with no corpus entry. Must be empty.
