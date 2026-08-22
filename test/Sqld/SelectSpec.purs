@@ -709,6 +709,95 @@ selectSpec = describe "Sqld.Select" do
             # formatInline
       query `shouldEqual` "SELECT * FROM \"articles\" ORDER BY \"published_at\" DESC LIMIT 10 OFFSET 20"
 
+  describe "row locking" do
+    it "FOR UPDATE" do
+      let query = select' [star]
+            # from "orders"
+            # forUpdate
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR UPDATE"
+
+    it "FOR NO KEY UPDATE" do
+      let query = select' [star] # from "orders" # forNoKeyUpdate # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR NO KEY UPDATE"
+
+    it "FOR SHARE" do
+      let query = select' [star] # from "orders" # forShare # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR SHARE"
+
+    it "FOR KEY SHARE" do
+      let query = select' [star] # from "orders" # forKeyShare # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR KEY SHARE"
+
+    -- The work-queue shape: the locking clause is emitted after LIMIT, which is
+    -- the only place SQL accepts it.
+    it "emitted after LIMIT and OFFSET" do
+      let query = select' [star]
+            # from "orders"
+            # where_ (col "status" .== str "pending")
+            # orderBy [asc (col "placed_at")]
+            # limit 10
+            # offset 5
+            # forUpdate
+            # skipLocked
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"orders\" WHERE \"status\" = 'pending' ORDER BY \"placed_at\" ASC LIMIT 10 OFFSET 5 FOR UPDATE SKIP LOCKED"
+
+    it "NOWAIT" do
+      let query = select' [star] # from "orders" # forUpdate # noWait # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR UPDATE NOWAIT"
+
+    -- NOWAIT and SKIP LOCKED share a field, so the later call replaces the
+    -- earlier rather than emitting both.
+    it "the later wait modifier wins" do
+      let query = select' [star] # from "orders" # forUpdate # noWait # skipLocked # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR UPDATE SKIP LOCKED"
+
+    it "OF names the FROM items to lock" do
+      let query = select' [star]
+            # fromAs "orders" "o"
+            # innerJoinAs "users" "u" (tcol "o" "user_id" .== tcol "u" "id")
+            # forUpdate
+            # lockOf ["o"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"orders\" AS \"o\" JOIN \"users\" AS \"u\" ON (\"o\".\"user_id\" = \"u\".\"id\") FOR UPDATE OF \"o\""
+
+    it "OF names append" do
+      let query = select' [star]
+            # from "orders"
+            # crossJoin "users"
+            # forUpdate
+            # lockOf ["orders"]
+            # lockOf ["users"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"orders\" CROSS JOIN \"users\" FOR UPDATE OF \"orders\", \"users\""
+
+    it "an empty OF list adds nothing" do
+      let query = select' [star] # from "orders" # forUpdate # lockOf [] # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR UPDATE"
+
+    it "two locking clauses" do
+      let query = select' [star]
+            # from "orders"
+            # innerJoin "users" (col "orders.user_id" .== col "users.id")
+            # forUpdate
+            # lockOf ["orders"]
+            # forShare
+            # lockOf ["users"]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"orders\" JOIN \"users\" ON (\"orders\".\"user_id\" = \"users\".\"id\") FOR UPDATE OF \"orders\" FOR SHARE OF \"users\""
+
+    -- A modifier is a refinement of a clause, not a clause of its own: with no
+    -- FOR … to refine there is no strength to assume, so the query is left
+    -- alone rather than given one.
+    it "modifiers on a query with no locking clause do nothing" do
+      let query = select' [star] # from "orders" # skipLocked # lockOf ["orders"] # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\""
+
   describe "mergeQueries" do
     it "override wins for scalar fields" do
       let base     = select' [star] # from "users" # where_ (col "active" .== bool true)
@@ -725,6 +814,12 @@ selectSpec = describe "Sqld.Select" do
           override = emptyQuery # innerJoin "c" (col "a.id" .== col "c.a_id")
           query    = mergeQueries base override # formatInline
       query `shouldEqual` "SELECT * FROM \"a\" JOIN \"b\" ON (\"a\".\"id\" = \"b\".\"a_id\") JOIN \"c\" ON (\"a\".\"id\" = \"c\".\"a_id\")"
+
+    it "locking clauses are concatenated" do
+      let base     = select' [star] # from "orders" # forUpdate # lockOf ["orders"]
+          override = emptyQuery # forShare # lockOf ["users"]
+          query    = mergeQueries base override # formatInline
+      query `shouldEqual` "SELECT * FROM \"orders\" FOR UPDATE OF \"orders\" FOR SHARE OF \"users\""
 
   describe "function composition (>>>)" do
     let baseUsers :: Query -> Query

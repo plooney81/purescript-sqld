@@ -44,6 +44,7 @@ Regenerate with `make examples`.
 - [Common table expressions](#common-table-expressions)
 - [Recursive CTEs](#recursive-ctes)
 - [Pagination](#pagination)
+- [Claiming work from a queue](#claiming-work-from-a-queue)
 - [Composing fragments](#composing-fragments)
 - [Merging independent queries](#merging-independent-queries)
 - [The raw escape hatch](#the-raw-escape-hatch)
@@ -1002,6 +1003,40 @@ OFFSET 40
 ```
 
 <sub>Parameterised: <code>SELECT "id", "title" FROM "articles" WHERE "published_at" IS NOT NULL ORDER BY "published_at" DESC, "id" ASC LIMIT 20 OFFSET 40</code></sub>
+
+---
+
+## Claiming work from a queue
+
+`FOR UPDATE` locks the rows this transaction reads; `SKIP LOCKED` steps over
+the ones another worker already holds instead of waiting behind them. Two
+workers running this at once therefore claim disjoint batches. The clause is
+emitted last, after `LIMIT`, which is the only place SQL accepts it.
+
+```purescript
+workQueue :: Query
+workQueue =
+  select' (cols [ "id", "total" ])
+    # from "orders"
+    # where_ (col "status" .== str "pending")
+    # orderBy [ asc (col "placed_at") ]
+    # limit 10
+    # forUpdate
+    # skipLocked
+```
+
+```sql
+SELECT "id", "total"
+FROM "orders"
+WHERE "status" = 'pending'
+ORDER BY "placed_at" ASC
+LIMIT 10
+FOR UPDATE SKIP LOCKED
+```
+
+Bound parameters: `$1` = `"pending"`
+
+<sub>Parameterised: <code>SELECT "id", "total" FROM "orders" WHERE "status" = $1 ORDER BY "placed_at" ASC LIMIT 10 FOR UPDATE SKIP LOCKED</code></sub>
 
 ---
 

@@ -1,9 +1,9 @@
 module Sqld.Select where
 
-import Data.Array (null) as Array
-import Data.Maybe (Maybe(..))
-import Prelude (identity, ($), (<<<), (<>), map)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), JoinCondition(..), JoinType(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
+import Data.Array (length, modifyAt, null) as Array
+import Data.Maybe (Maybe(..), fromMaybe)
+import Prelude (identity, ($), (-), (<<<), (<>), map)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
 import Sqld.Expr (col, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -393,6 +393,101 @@ offset :: Int -> Query -> Query
 offset n q = q { offset = Just n }
 
 -- ---------------------------------------------------------------------------
+-- Row locking
+-- ---------------------------------------------------------------------------
+
+-- | `FOR UPDATE` — lock every row the query returns against any other
+-- | transaction reading them for update, modifying them or deleting them, until
+-- | this transaction ends.
+-- |
+-- | The clause is emitted last, after `LIMIT` and `OFFSET`, and the lock is
+-- | held by whatever transaction runs the statement — this library emits SQL,
+-- | it does not open transactions, so a `FOR UPDATE` outside one locks nothing
+-- | for any longer than the statement itself.
+-- |
+-- | `skipLocked`, `noWait` and `lockOf` refine the clause most recently added:
+-- |
+-- |     select' [ star ] # from "orders" # limit 10 # forUpdate # skipLocked
+-- |     -- SELECT * FROM "orders" LIMIT 10 FOR UPDATE SKIP LOCKED
+forUpdate :: Query -> Query
+forUpdate = lockRows ForUpdate
+
+-- | `FOR NO KEY UPDATE` — as `forUpdate`, but weaker in one respect: it does
+-- | not block the `FOR KEY SHARE` lock a foreign key reference takes, so
+-- | another transaction may still insert a child row against a parent locked
+-- | this way. That is the lock an `UPDATE` which leaves the key columns alone
+-- | takes for itself.
+forNoKeyUpdate :: Query -> Query
+forNoKeyUpdate = lockRows ForNoKeyUpdate
+
+-- | `FOR SHARE` — several transactions may hold it at once, and it blocks
+-- | anything that would modify or delete the rows. The read-and-then-decide
+-- | lock: it guarantees the rows are still there and unchanged at commit
+-- | without stopping anyone else reading them the same way.
+forShare :: Query -> Query
+forShare = lockRows ForShare
+
+-- | `FOR KEY SHARE` — the weakest: it blocks only `DELETE` and an `UPDATE`
+-- | that changes a key column. It is the lock PostgreSQL takes on a parent row
+-- | when a foreign key references it.
+forKeyShare :: Query -> Query
+forKeyShare = lockRows ForKeyShare
+
+-- | The general form: any lock strength, appended as a clause of its own.
+-- |
+-- | Additive, like `groupBy` and `select`, because SQL allows more than one
+-- | locking clause and each says something different — `FOR UPDATE OF "o" FOR
+-- | SHARE OF "u"` locks the order for writing and the user against change.
+-- | Record update replaces the list outright.
+lockRows :: LockStrength -> Query -> Query
+lockRows strength q =
+  q { locking = q.locking <> [ { strength, tables: [], wait: Nothing } ] }
+
+-- | `FOR UPDATE OF "a", "b"` — restricts the clause to those `FROM` items
+-- | rather than every one of them. The names are the ones the items go by in
+-- | the query, so an aliased relation is named by its alias, and PostgreSQL
+-- | rejects a name that is not in the `FROM` list.
+-- |
+-- | Names append, so repeated calls add to the list, and an empty list adds
+-- | nothing — `OF ()` is not something PostgreSQL parses, and an empty list
+-- | arises naturally when the relations are driven by user input. A clause with
+-- | no `OF` at all locks every `FROM` item, which is the default.
+lockOf :: Array String -> Query -> Query
+lockOf tables = modifyLock \l -> l { tables = l.tables <> tables }
+
+-- | `NOWAIT` — fail rather than wait for a row another transaction has locked.
+-- |
+-- | `noWait` and `skipLocked` share a field, because SQL admits one or the
+-- | other and never both: whichever is applied last wins.
+noWait :: Query -> Query
+noWait = setWait NoWait
+
+-- | `SKIP LOCKED` — leave out the rows another transaction has locked rather
+-- | than wait for them.
+-- |
+-- | This is what makes `SELECT … FOR UPDATE SKIP LOCKED` a work queue: each
+-- | worker claims the first rows nobody else holds, so concurrent workers take
+-- | disjoint batches instead of queueing behind the same one. The rows skipped
+-- | are gone from the result, not merely unlocked, so a `limit` bounds what a
+-- | worker takes rather than what it sees.
+skipLocked :: Query -> Query
+skipLocked = setWait SkipLocked
+
+setWait :: LockWait -> Query -> Query
+setWait wait = modifyLock _ { wait = Just wait }
+
+-- | Refines the locking clause most recently added.
+-- |
+-- | A query with no locking clause is left alone: `SKIP LOCKED` and `OF "t"`
+-- | are modifiers of a clause rather than clauses themselves, and there is no
+-- | strength for a bare one to assume — `FOR UPDATE` and `FOR SHARE` differ in
+-- | what they permit, so guessing either would be guessing what the caller
+-- | meant to lock out.
+modifyLock :: (Locking -> Locking) -> Query -> Query
+modifyLock f q =
+  q { locking = fromMaybe q.locking (Array.modifyAt (Array.length q.locking - 1) f q.locking) }
+
+-- ---------------------------------------------------------------------------
 -- SELECT list helpers
 -- ---------------------------------------------------------------------------
 
@@ -476,4 +571,5 @@ mergeQueries base override =
   , offset:   case override.offset of
                 Nothing -> base.offset
                 Just _  -> override.offset
+  , locking:  base.locking <> override.locking
   }

@@ -5,7 +5,7 @@ import Data.String (trim)
 import Sqld.Core (JoinCondition(..), JoinType(..), Literal(..))
 import Sqld.Expr (and, bool, col, countStar, currentRow, exists, inSub, int, null, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, tcol, unboundedPreceding, withFrame, (.==))
 import Sqld.Format (format, formatInline, formatPretty)
-import Sqld.Select (as, asc, cols, derived, desc, except, expr, from, fromAs, fromSub, joinOn, joinRel, lateral, leftJoin, orderBy, select', star, starFrom, union, unionAll, where_, with_)
+import Sqld.Select (as, asc, cols, derived, desc, except, expr, forUpdate, from, fromAs, fromSub, joinOn, joinRel, lateral, leftJoin, limit, orderBy, select', skipLocked, star, starFrom, union, unionAll, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 
@@ -307,6 +307,26 @@ EXCEPT
 SELECT "name", ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS "rn"
 FROM "users"
 WHERE "active" = TRUE
+"""
+
+    -- A locking clause is a clause of the query, so it gets a line of its own,
+    -- last of all.
+    it "the locking clause is a clause like any other" do
+      let query = select' [star]
+            # from "orders"
+            # where_ (col "status" .== str "pending")
+            # orderBy [asc (col "placed_at")]
+            # limit 10
+            # forUpdate
+            # skipLocked
+            # formatPretty
+      query `shouldEqual` trim """
+SELECT *
+FROM "orders"
+WHERE "status" = 'pending'
+ORDER BY "placed_at" ASC
+LIMIT 10
+FOR UPDATE SKIP LOCKED
 """
 
     it "leaves formatInline on one line" do

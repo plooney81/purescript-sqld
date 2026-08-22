@@ -68,7 +68,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `JoinType`, `JoinCondition`, `emptyQuery`, `emptyWindow`, `Keyword` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `emptyQuery`, `emptyWindow`, `Keyword` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
 | `Sqld.Select` | SELECT query builders and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
@@ -118,6 +118,11 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `orderBy :: Array OrderExpr -> Query -> Query` | ORDER BY |
 | `limit :: Int -> Query -> Query` | LIMIT |
 | `offset :: Int -> Query -> Query` | OFFSET |
+| `forUpdate` / `forNoKeyUpdate` / `forShare` / `forKeyShare` | `:: Query -> Query` — add a `FOR …` row-locking clause |
+| `lockRows :: LockStrength -> Query -> Query` | General form; appends a locking clause of any strength |
+| `lockOf :: Array String -> Query -> Query` | `OF "a", "b"` — restrict the clause to those `FROM` items |
+| `noWait :: Query -> Query` | `NOWAIT` — fail rather than wait for a locked row |
+| `skipLocked :: Query -> Query` | `SKIP LOCKED` — leave locked rows out of the result |
 | `mergeQueries :: Query -> Query -> Query` | Merge two queries; right side wins for scalars |
 
 ### SELECT list helpers
@@ -597,6 +602,69 @@ right.
 orderBy [asc (col "name"), desc (col "created_at")]
 -- ORDER BY "name" ASC, "created_at" DESC
 ```
+
+### Row locking
+
+`forUpdate` locks the rows a query returns against any other transaction
+reading them for update, modifying them or deleting them. `skipLocked` leaves
+out the rows another transaction already holds, rather than waiting behind
+them — which is what makes the two together a work queue:
+
+```purescript
+select' (cols ["id", "total"])
+  # from "orders"
+  # where_ (col "status" .== str "pending")
+  # orderBy [asc (col "placed_at")]
+  # limit 10
+  # forUpdate
+  # skipLocked
+-- SELECT "id", "total" FROM "orders" WHERE "status" = $1
+-- ORDER BY "placed_at" ASC LIMIT 10
+-- FOR UPDATE SKIP LOCKED
+```
+
+Two workers running that at once claim disjoint batches, because the rows one
+has locked are gone from the other's result rather than merely unlocked — so
+`limit` bounds what a worker takes rather than what it sees.
+
+| Builder | SQL | Locks out |
+|---|---|---|
+| `forUpdate` | `FOR UPDATE` | Any other lock, update or delete |
+| `forNoKeyUpdate` | `FOR NO KEY UPDATE` | As above, but permits a foreign key reference |
+| `forShare` | `FOR SHARE` | Updates and deletes; other `FOR SHARE` holders are fine |
+| `forKeyShare` | `FOR KEY SHARE` | Deletes and updates to a key column |
+
+`lockOf` restricts a clause to some of the query's `FROM` items rather than all
+of them, naming them the way the query does — an aliased relation by its alias:
+
+```purescript
+select' [starFrom "o"]
+  # fromAs "orders" "o"
+  # innerJoin "users" (tcol "o" "user_id" .== tcol "users" "id")
+  # forUpdate
+  # lockOf ["o"]
+-- SELECT "o".* FROM "orders" AS "o"
+-- JOIN "users" ON ("o"."user_id" = "users"."id")
+-- FOR UPDATE OF "o"
+```
+
+The builders are additive, so more than one clause can be applied — `forUpdate
+# lockOf ["orders"] # forShare # lockOf ["users"]` locks the order for writing
+and holds the user it belongs to against change. `lockOf`, `noWait` and
+`skipLocked` refine the clause most recently added, and do nothing at all to a
+query with no locking clause: they are modifiers rather than clauses, and there
+is no strength for a bare one to assume. `noWait` and `skipLocked` share a
+field, since SQL admits one or the other and never both, so the later call
+replaces the earlier.
+
+The clause is emitted last, after `LIMIT` and `OFFSET`, and carries no
+parameters. This library emits statements and does not manage sessions, so the
+lock is held by whatever transaction runs the SQL — outside one, a `FOR UPDATE`
+locks nothing for longer than the statement itself. PostgreSQL rejects a
+locking clause on a query that also uses `DISTINCT`, `GROUP BY`, `HAVING`, a
+window function or a set operation, and rejects one naming a relation that is
+not in the `FROM` list; those are rules it enforces itself rather than ones the
+types express.
 
 ### Formatting
 
