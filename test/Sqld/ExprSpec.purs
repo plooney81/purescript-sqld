@@ -2,7 +2,7 @@ module Test.Sqld.ExprSpec where
 
 import Prelude (Unit, discard, (#), (<>))
 import Sqld.Core (FrameMode(..), Literal(..), emptyWindow)
-import Sqld.Expr (and, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, filterWhere, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, orderWindow, orderWindow', over, partitionBy, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.==), (.>), (.>=))
+import Sqld.Expr (allOf, and, anyOf, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, eqAny, exists, filterWhere, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, orderWindow, orderWindow', over, partitionBy, partitionBy', preceding, range, rank, raw, rowNumber, rows, someOf, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.==), (.>), (.>=))
 import Sqld.Format (format, formatInline)
 import Sqld.Select (as, asc, cols, desc, expr, from, groupBy, having, orderBy, select', star, where_)
 import Test.Spec (Spec, describe, it)
@@ -516,3 +516,63 @@ exprSpec = describe "Sqld.Expr" do
             # formatInline
       query `shouldEqual`
         "SELECT \"department\", COUNT(*) AS \"headcount\" FROM \"users\" GROUP BY \"department\" HAVING COUNT(*) FILTER (WHERE \"active\" = TRUE) > 1"
+
+  describe "quantified comparisons (ANY / ALL)" do
+    it "= ANY with a subquery" do
+      let orders = select' [expr (col "user_id")] # from "orders"
+          query = select' [star]
+            # from "users"
+            # where_ (eqAny (col "id") (sub orders))
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" WHERE \"id\" = ANY (SELECT \"user_id\" FROM \"orders\")"
+
+    it "> ALL with a subquery" do
+      let query = select' [star]
+            # from "orders"
+            # where_ (allOf ">" (col "total")
+                       (sub (select' [expr (col "total")] # from "orders"
+                               # where_ (col "status" .== str "paid"))))
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"orders\" WHERE \"total\" > ALL (SELECT \"total\" FROM \"orders\" WHERE \"status\" = 'paid')"
+
+    it "anyOf with a non-equality operator" do
+      let query = select' [star]
+            # from "orders"
+            # where_ (anyOf "<" (col "total")
+                       (sub (select' [expr (col "total")] # from "orders")))
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"orders\" WHERE \"total\" < ANY (SELECT \"total\" FROM \"orders\")"
+
+    it "brackets a non-subquery right operand" do
+      let query = select' [star]
+            # from "t"
+            # where_ (eqAny (col "id") (col "ids"))
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"t\" WHERE \"id\" = ANY (\"ids\")"
+
+    it "parameters thread through the subquery" do
+      let result = select' [star]
+            # from "users"
+            # where_ (and [ col "active" .== bool true
+                          , eqAny (col "id")
+                              (sub (select' [expr (col "user_id")]
+                                      # from "orders"
+                                      # where_ (col "status" .== str "paid")))
+                          ])
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"users\" WHERE (\"active\" = $1 AND \"id\" = ANY (SELECT \"user_id\" FROM \"orders\" WHERE \"status\" = $2))"
+      result.params `shouldEqual` [LitBoolean true, LitString "paid"]
+
+    it "someOf is an alias for anyOf" do
+      let query = select' [star]
+            # from "users"
+            # where_ (someOf "=" (col "id")
+                       (sub (select' [expr (col "user_id")] # from "orders")))
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" WHERE \"id\" = ANY (SELECT \"user_id\" FROM \"orders\")"

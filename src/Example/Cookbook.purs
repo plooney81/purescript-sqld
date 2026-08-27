@@ -23,7 +23,7 @@ import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
-import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
+import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', skipLocked, star, starFrom, tcols, unionAll, where_, withCte, with_)
 
 type Example =
@@ -346,6 +346,26 @@ subqueryIn =
             )
         )
 
+-- #example any-all
+-- # Quantified comparisons: ANY, ALL
+-- `eqAny` is `= ANY (…)`, the idiomatic way to check membership against a
+-- subquery — or, once array literals land, a single array parameter, which
+-- sidesteps variable-length `IN` lists entirely. `anyOf` and `allOf` generalise
+-- to any comparison operator.
+anyAllExample :: Query
+anyAllExample =
+  select' [ star ]
+    # from "users"
+    # where_
+        ( eqAny (col "id")
+            ( sub
+                ( select' (cols [ "user_id" ])
+                    # from "orders"
+                    # where_ (col "status" .== str "paid")
+                )
+            )
+        )
+
 -- #example scalar-subquery
 -- # Scalar subqueries
 -- A subquery in the select list, correlated against the outer row.
@@ -610,6 +630,7 @@ cookbook =
   , { name: "exists",               query: existsExample }
   , { name: "not-exists",           query: notExistsExample }
   , { name: "subquery-in",          query: subqueryIn }
+  , { name: "any-all",              query: anyAllExample }
   , { name: "scalar-subquery",      query: scalarSubquery }
   , { name: "derived-table",        query: derivedTable }
   , { name: "derived-table-join",   query: derivedTableJoin }

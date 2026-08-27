@@ -26,8 +26,8 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, length, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust, maybe)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
-import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, eqAny, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, orderBy, orderUsing, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
@@ -763,6 +763,67 @@ handWritten =
             )
     }
 
+  -- Quantified comparisons (ANY / ALL) ----------------------------------------
+
+  , { name: "any-subquery"
+    , query: select' [ star ]
+        # from "users"
+        # where_
+            ( eqAny (col "id")
+                ( sub
+                    ( select' [ expr (col "user_id") ] # from "orders" )
+                )
+            )
+    }
+
+  , { name: "all-subquery"
+    , query: select' [ star ]
+        # from "orders"
+        # where_
+            ( allOf ">" (col "total")
+                ( sub
+                    ( select' [ expr (col "total") ]
+                        # from "orders"
+                        # where_ (col "status" .== str "paid")
+                    )
+                )
+            )
+    }
+
+  -- Parameters inside a quantified subquery are numbered in step with the
+  -- outer query, as they are for IN (SELECT …).
+  , { name: "any-subquery-parameter-ordering"
+    , query: select' [ star ]
+        # fromAs "users" "u"
+        # where_
+            ( and
+                [ tcol "u" "active" .== bool true
+                , eqAny (tcol "u" "id")
+                    ( sub
+                        ( select' [ expr (col "user_id") ]
+                            # from "orders"
+                            # where_ (col "status" .== str "paid")
+                        )
+                    )
+                ]
+            )
+    }
+
+  -- The general `anyOf` with an operator other than `=`.
+  , { name: "any-subquery-operator"
+    , query: select' [ star ]
+        # from "orders"
+        # where_
+            ( anyOf "<" (col "total")
+                ( sub
+                    ( select' [ expr (col "total") ]
+                        # from "orders"
+                        # where_ (col "status" .== str "paid")
+                    )
+                )
+            )
+    }
+
   -- Select-list composition ---------------------------------------------------
 
   , { name: "mixed-select-list"
@@ -1281,6 +1342,7 @@ exprTags e = case e of
   -- each individual operator reaches PostgreSQL now that they share a
   -- constructor.
   BinOp op l r -> nodes [ "Expr.BinOp", "Expr.BinOp." <> op ] [ l, r ]
+  Quantified qop op l r -> nodes [ "Expr.Quantified", "Expr.Quantified." <> quantOpTag qop ] [ l, r ]
   Unary op x -> nodes [ "Expr.Unary", "Expr.Unary." <> op ] [ x ]
   Postfix op x -> nodes [ "Expr.Postfix", "Expr.Postfix." <> op ] [ x ]
   Cast x _ -> node "Expr.Cast" [ x ]
@@ -1347,6 +1409,11 @@ distinctTags :: Distinct -> Array String
 distinctTags = case _ of
   Distinct -> [ "Query.distinct" ]
   DistinctOn exprs -> "Query.distinctOn" : Array.concatMap exprTags exprs
+
+quantOpTag :: QuantOp -> String
+quantOpTag = case _ of
+  Any -> "ANY"
+  All -> "ALL"
 
 literalTag :: Literal -> String
 literalTag = case _ of
@@ -1524,6 +1591,9 @@ requiredTags = Array.sort
   , "Expr.Between"
   , "Expr.Over"
   , "Expr.Filter"
+  , "Expr.Quantified"
+  , "Expr.Quantified.ANY"
+  , "Expr.Quantified.ALL"
   , "Expr.Raw"
   , "Window.partitionBy"
   , "Window.orderBy"

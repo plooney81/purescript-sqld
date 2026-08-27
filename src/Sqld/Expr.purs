@@ -10,7 +10,7 @@ module Sqld.Expr where
 import Prelude (($), (+), (<<<))
 import Data.Maybe (Maybe(..))
 import Data.String as String
-import Sqld.Core (Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), OrderExpr, Query, Window, emptyWindow)
+import Sqld.Core (Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), OrderExpr, QuantOp(..), Query, Window, emptyWindow)
 
 -- ---------------------------------------------------------------------------
 -- Column references
@@ -169,6 +169,30 @@ inSub e = BinOp "IN" e <<< Sub
 -- | `e NOT IN (SELECT …)`.
 notInSub :: Expr -> Query -> Expr
 notInSub e = BinOp "NOT IN" e <<< Sub
+
+-- ---------------------------------------------------------------------------
+-- Quantified comparisons
+-- ---------------------------------------------------------------------------
+
+-- | `e op ANY (array-or-subquery)`: true when the comparison holds for at
+-- | least one element.
+anyOf :: String -> Expr -> Expr -> Expr
+anyOf op = Quantified Any op
+
+-- | `e op ALL (array-or-subquery)`: true when the comparison holds for every
+-- | element.
+allOf :: String -> Expr -> Expr -> Expr
+allOf op = Quantified All op
+
+-- | `e = ANY (…)` — the idiomatic way to check membership against a subquery
+-- | or an array parameter without generating a variable-length `IN` list.
+eqAny :: Expr -> Expr -> Expr
+eqAny = anyOf "="
+
+-- | Synonym for `anyOf`. `SOME` and `ANY` are interchangeable in PostgreSQL;
+-- | this library emits `ANY`.
+someOf :: String -> Expr -> Expr -> Expr
+someOf = anyOf
 
 exists :: Query -> Expr
 exists = Unary "EXISTS" <<< Sub

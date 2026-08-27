@@ -378,7 +378,8 @@ atomPrec :: Int
 atomPrec = 99
 
 precOf :: Expr -> Int
-precOf (BinOp op _ _)  = opPrec op
+precOf (BinOp op _ _)         = opPrec op
+precOf (Quantified _ op _ _)  = opPrec op
 precOf (Unary op _)    = unaryPrec op
 precOf (Postfix _ _)   = 4
 precOf (Cast _ _)      = 12
@@ -425,6 +426,12 @@ formatExpr layout (BinOp op l r) state = Tuple (lSql <> " " <> op <> " " <> rSql
   Tuple lSql s1 = formatChild layout prec l state
   -- Left-associative: an equal-precedence right operand needs bracketing.
   Tuple rSql s2 = formatChild layout (prec + 1) r s1
+formatExpr layout (Quantified qop op l r) state =
+  Tuple (lSql <> " " <> op <> " " <> keyword qop <> " " <> rSql) s2
+  where
+  prec = opPrec op
+  Tuple lSql s1 = formatChild layout prec l state
+  Tuple rSql s2 = formatQuantArg layout r s1
 formatExpr layout (Unary op e) state = Tuple (op <> " " <> sql) s'
   where
   Tuple sql s' = formatChild layout (unaryPrec op) e state
@@ -506,6 +513,16 @@ formatFrame { mode, start, end } = keyword mode <> " " <> boundsSql
 -- ---------------------------------------------------------------------------
 -- Helpers
 -- ---------------------------------------------------------------------------
+
+-- | The right operand of `ANY` / `ALL`: a subquery gets the same indented
+-- | block that `Sub` gives it, anything else gets simple parentheses.
+formatQuantArg :: Layout -> Expr -> WithBindings String
+formatQuantArg layout (Sub q) state = Tuple (parenthesise layout sql) s'
+  where
+  Tuple sql s' = formatQuery (nest layout) q state
+formatQuantArg layout e state = Tuple ("(" <> sql <> ")") s'
+  where
+  Tuple sql s' = formatExpr layout e state
 
 -- | A bracketed, comma-separated list of expressions: the `(a, b)` of a row
 -- | constructor, of `CUBE`, and of one grouping set. An empty list gives `()`,
