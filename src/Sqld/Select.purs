@@ -3,7 +3,7 @@ module Sqld.Select where
 import Data.Array (length, modifyAt, null) as Array
 import Data.Maybe (Maybe(..), fromMaybe)
 import Prelude (identity, ($), (-), (<<<), (<>), map)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
 import Sqld.Expr (col, int, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -541,10 +541,25 @@ tcolAs :: String -> String -> String -> SelectExpr
 tcolAs t c alias = SelectAs (Col { table: Just t, column: c }) alias
 
 asc :: Expr -> OrderExpr
-asc e = { expr: e, dir: Asc }
+asc e = { expr: e, dir: Asc, nulls: Nothing }
 
 desc :: Expr -> OrderExpr
-desc e = { expr: e, dir: Desc }
+desc e = { expr: e, dir: Desc, nulls: Nothing }
+
+ascNullsFirst :: Expr -> OrderExpr
+ascNullsFirst e = { expr: e, dir: Asc, nulls: Just NullsFirst }
+
+ascNullsLast :: Expr -> OrderExpr
+ascNullsLast e = { expr: e, dir: Asc, nulls: Just NullsLast }
+
+descNullsFirst :: Expr -> OrderExpr
+descNullsFirst e = { expr: e, dir: Desc, nulls: Just NullsFirst }
+
+descNullsLast :: Expr -> OrderExpr
+descNullsLast e = { expr: e, dir: Desc, nulls: Just NullsLast }
+
+orderUsing :: String -> Expr -> OrderExpr
+orderUsing op e = { expr: e, dir: OrderUsing op, nulls: Nothing }
 
 -- ---------------------------------------------------------------------------
 -- Composition

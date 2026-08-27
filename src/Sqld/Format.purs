@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (class Keyword, keyword, Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Join, JoinCondition(..), Literal(..), Locking, OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Join, JoinCondition(..), Literal(..), Locking, OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window, keyword)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -322,11 +322,12 @@ formatOrderBy layout exprs state = Tuple ("ORDER BY " <> intercalate ", " parts)
   Tuple parts s' = mapAccum (formatOrderExpr layout) state exprs
 
 formatOrderExpr :: Layout -> OrderExpr -> WithBindings String
-formatOrderExpr layout { expr, dir } state = Tuple (sql <> " " <> dirSql) s'
+formatOrderExpr layout { expr, dir, nulls } state = Tuple (sql <> " " <> dirSql <> nullsSql) s'
   where
   Tuple sql s' = formatExpr layout expr state
 
   dirSql = keyword dir
+  nullsSql = maybe mempty (\n -> " " <> keyword n) nulls
 
 formatLimit :: Layout -> Maybe Expr -> WithBindings String
 formatLimit _ Nothing       state = Tuple mempty state

@@ -751,6 +751,77 @@ selectSpec = describe "Sqld.Select" do
         "SELECT * FROM \"users\" WHERE \"active\" = $1 LIMIT ALL"
       result.params `shouldEqual` [LitBoolean true]
 
+    it "ORDER BY DESC NULLS LAST" do
+      let query = select' [star]
+            # from "articles"
+            # orderBy [descNullsLast (col "published_at"), asc (col "title")]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"articles\" ORDER BY \"published_at\" DESC NULLS LAST, \"title\" ASC"
+
+    it "ORDER BY ASC NULLS FIRST" do
+      let query = select' [star]
+            # from "users"
+            # orderBy [ascNullsFirst (col "email")]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" ORDER BY \"email\" ASC NULLS FIRST"
+
+    it "ORDER BY ASC NULLS LAST" do
+      let query = select' [star]
+            # from "users"
+            # orderBy [ascNullsLast (col "email")]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" ORDER BY \"email\" ASC NULLS LAST"
+
+    it "ORDER BY DESC NULLS FIRST" do
+      let query = select' [star]
+            # from "users"
+            # orderBy [descNullsFirst (col "score")]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" ORDER BY \"score\" DESC NULLS FIRST"
+
+    it "ORDER BY USING <" do
+      let query = select' [star]
+            # from "users"
+            # orderBy [orderUsing "<" (col "name")]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" ORDER BY \"name\" USING <"
+
+    it "null ordering does not affect existing asc/desc output" do
+      let query = select' [star]
+            # from "t"
+            # orderBy [asc (col "a"), desc (col "b")]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"t\" ORDER BY \"a\" ASC, \"b\" DESC"
+
+    it "mixed ordering with null ordering and USING" do
+      let query = select' [star]
+            # from "users"
+            # orderBy
+                [ descNullsLast (col "score")
+                , asc (col "name")
+                , orderUsing "<" (col "id")
+                ]
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"users\" ORDER BY \"score\" DESC NULLS LAST, \"name\" ASC, \"id\" USING <"
+
+    it "null ordering parameters are numbered correctly" do
+      let result = select' [star]
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # orderBy [descNullsLast (col "score")]
+            # limit 10
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"users\" WHERE \"active\" = $1 ORDER BY \"score\" DESC NULLS LAST LIMIT $2"
+      result.params `shouldEqual` [LitBoolean true, LitInt 10]
+
   describe "row locking" do
     it "FOR UPDATE" do
       let query = select' [star]
