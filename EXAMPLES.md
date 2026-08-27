@@ -36,6 +36,7 @@ Regenerate with `make examples`.
 - [EXISTS](#exists)
 - [NOT EXISTS](#not-exists)
 - [IN (SELECT …)](#in-select)
+- [Quantified comparisons: ANY, ALL](#quantified-comparisons-any-all)
 - [Scalar subqueries](#scalar-subqueries)
 - [Derived tables](#derived-tables)
 - [Joining a derived table](#joining-a-derived-table)
@@ -669,6 +670,45 @@ WHERE "id" IN (
 Bound parameters: `$1` = `100`
 
 <sub>Parameterised: <code>SELECT * FROM "users" WHERE "id" IN (SELECT "user_id" FROM "orders" WHERE "total" > $1)</code></sub>
+
+---
+
+## Quantified comparisons: ANY, ALL
+
+`eqAny` is `= ANY (…)`, the idiomatic way to check membership against a
+subquery — or, once array literals land, a single array parameter, which
+sidesteps variable-length `IN` lists entirely. `anyOf` and `allOf` generalise
+to any comparison operator.
+
+```purescript
+anyAllExample :: Query
+anyAllExample =
+  select' [ star ]
+    # from "users"
+    # where_
+        ( eqAny (col "id")
+            ( sub
+                ( select' (cols [ "user_id" ])
+                    # from "orders"
+                    # where_ (col "status" .== str "paid")
+                )
+            )
+        )
+```
+
+```sql
+SELECT *
+FROM "users"
+WHERE "id" = ANY (
+  SELECT "user_id"
+  FROM "orders"
+  WHERE "status" = 'paid'
+)
+```
+
+Bound parameters: `$1` = `"paid"`
+
+<sub>Parameterised: <code>SELECT * FROM "users" WHERE "id" = ANY (SELECT "user_id" FROM "orders" WHERE "status" = $1)</code></sub>
 
 ---
 

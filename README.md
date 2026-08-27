@@ -227,6 +227,9 @@ From `Sqld.Expr`:
 | `between` | `between (col "n") (int 1) (int 10)` | `"n" BETWEEN $1 AND $2` |
 | `like / ilike` | `like (col "email") "%@acme.com"` | `"email" LIKE $1` |
 | `notLike / notILike` | `notLike (col "email") "%@spam.com"` | `"email" NOT LIKE $1` |
+| `eqAny :: Expr -> Expr -> Expr` | `eqAny (col "id") (sub orders)` | `"id" = ANY (SELECT …)` |
+| `anyOf :: String -> Expr -> Expr -> Expr` | `anyOf ">" (col "n") (sub q)` | `"n" > ANY (SELECT …)` |
+| `allOf :: String -> Expr -> Expr -> Expr` | `allOf "<" (col "n") (sub q)` | `"n" < ALL (SELECT …)` |
 
 ### Generic nodes
 

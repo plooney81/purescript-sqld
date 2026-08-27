@@ -13,6 +13,14 @@ class Keyword a where
 
 type ColumnRef = { table :: Maybe String, column :: String }
 
+-- | Whether a quantified comparison tests against at least one (`ANY`) or
+-- | every (`ALL`) element of its right operand.
+data QuantOp = Any | All
+
+instance Keyword QuantOp where
+  keyword Any = "ANY"
+  keyword All = "ALL"
+
 -- | Anything that can appear in `FROM` or as a join target.
 -- |
 -- | `Derived` takes its alias as a plain `String` rather than a `Maybe`:
@@ -47,6 +55,9 @@ data Expr
   | App String (Array Expr)
   -- | Infix operator: `left op right`.
   | BinOp String Expr Expr
+  -- | Quantified comparison: `left op ANY (right)` or `left op ALL (right)`.
+  -- | The right operand is always bracketed in the emitted SQL.
+  | Quantified QuantOp String Expr Expr
   -- | Prefix operator: `op operand` (`NOT`, `EXISTS`, unary `-`).
   | Unary String Expr
   -- | Postfix operator: `operand op` (`IS NULL`, `IS NOT NULL`).
