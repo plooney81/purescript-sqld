@@ -28,7 +28,7 @@ import Data.Maybe (Maybe(..), isJust, maybe)
 import Example.Cookbook (cookbook) as Cookbook
 import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
 import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, lockOf, naturalJoin, noWait, offset, orderBy, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, orderBy, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -504,6 +504,14 @@ handWritten =
         # orderBy [ desc (col "published_at") ]
         # limit 10
         # offset 20
+    }
+
+  -- `LIMIT ALL` is PostgreSQL's way of saying "no limit", equivalent to omitting
+  -- the clause. It is a keyword, not a parameter, so it adds no bindings.
+  , { name: "limit-all"
+    , query: select' [ star ]
+        # from "articles"
+        # limitAll
     }
 
   -- Row locking ---------------------------------------------------------------
@@ -1423,8 +1431,8 @@ queryTags q =
     <> clause "Query.groupBy" (Array.concatMap groupingTags q.groupBy) (Array.null q.groupBy)
     <> foldClause "Query.having" (map exprTags q.having)
     <> clause "Query.orderBy" (Array.concatMap orderTags q.orderBy) (Array.null q.orderBy)
-    <> foldClause "Query.limit" (map (const []) q.limit)
-    <> foldClause "Query.offset" (map (const []) q.offset)
+    <> foldClause "Query.limit" (map exprTags q.limit)
+    <> foldClause "Query.offset" (map exprTags q.offset)
     <> lockingClauseTags q.locking
   where
   foldClause tag = case _ of

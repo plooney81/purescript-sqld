@@ -709,6 +709,48 @@ selectSpec = describe "Sqld.Select" do
             # formatInline
       query `shouldEqual` "SELECT * FROM \"articles\" ORDER BY \"published_at\" DESC LIMIT 10 OFFSET 20"
 
+    it "LIMIT ALL" do
+      let query = select' [star]
+            # from "users"
+            # limitAll
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" LIMIT ALL"
+
+    it "limitExpr with an arbitrary expression" do
+      let query = select' [star]
+            # from "users"
+            # limitExpr (binOp "+" (int 5) (int 5))
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" LIMIT 5 + 5"
+
+    it "offsetExpr with an arbitrary expression" do
+      let query = select' [star]
+            # from "users"
+            # offsetExpr (binOp "*" (int 10) (int 2))
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"users\" OFFSET 10 * 2"
+
+    it "numbers limit and offset parameters after the WHERE clause's" do
+      let result = select' [star]
+            # from "users"
+            # where_ (col "id" .== int 42)
+            # limit 10
+            # offset 20
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"users\" WHERE \"id\" = $1 LIMIT $2 OFFSET $3"
+      result.params `shouldEqual` [LitInt 42, LitInt 10, LitInt 20]
+
+    it "LIMIT ALL emits no parameters" do
+      let result = select' [star]
+            # from "users"
+            # where_ (col "active" .== bool true)
+            # limitAll
+            # format
+      result.sql `shouldEqual`
+        "SELECT * FROM \"users\" WHERE \"active\" = $1 LIMIT ALL"
+      result.params `shouldEqual` [LitBoolean true]
+
   describe "row locking" do
     it "FOR UPDATE" do
       let query = select' [star]

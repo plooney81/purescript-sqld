@@ -817,7 +817,9 @@ JOIN LATERAL (
 ) AS "recent" ON (TRUE)
 ```
 
-<sub>Parameterised: <code>SELECT "u"."name", "recent"."total" FROM "users" AS "u" JOIN LATERAL (SELECT "total" FROM "orders" WHERE "orders"."user_id" = "u"."id" ORDER BY "placed_at" DESC LIMIT 3) AS "recent" ON (TRUE)</code></sub>
+Bound parameters: `$1` = `3`
+
+<sub>Parameterised: <code>SELECT "u"."name", "recent"."total" FROM "users" AS "u" JOIN LATERAL (SELECT "total" FROM "orders" WHERE "orders"."user_id" = "u"."id" ORDER BY "placed_at" DESC LIMIT $1) AS "recent" ON (TRUE)</code></sub>
 
 ---
 
@@ -864,9 +866,9 @@ ORDER BY "id" ASC
 LIMIT 20
 ```
 
-Bound parameters: `$1` = `true`, `$2` = `"cancelled"`
+Bound parameters: `$1` = `true`, `$2` = `"cancelled"`, `$3` = `20`
 
-<sub>Parameterised: <code>(SELECT "id" FROM "users" WHERE "active" = $1) EXCEPT (SELECT "user_id" FROM "orders" WHERE "status" = $2) ORDER BY "id" ASC LIMIT 20</code></sub>
+<sub>Parameterised: <code>(SELECT "id" FROM "users" WHERE "active" = $1) EXCEPT (SELECT "user_id" FROM "orders" WHERE "status" = $2) ORDER BY "id" ASC LIMIT $3</code></sub>
 
 ---
 
@@ -1002,7 +1004,9 @@ LIMIT 20
 OFFSET 40
 ```
 
-<sub>Parameterised: <code>SELECT "id", "title" FROM "articles" WHERE "published_at" IS NOT NULL ORDER BY "published_at" DESC, "id" ASC LIMIT 20 OFFSET 40</code></sub>
+Bound parameters: `$1` = `20`, `$2` = `40`
+
+<sub>Parameterised: <code>SELECT "id", "title" FROM "articles" WHERE "published_at" IS NOT NULL ORDER BY "published_at" DESC, "id" ASC LIMIT $1 OFFSET $2</code></sub>
 
 ---
 
@@ -1034,9 +1038,9 @@ LIMIT 10
 FOR UPDATE SKIP LOCKED
 ```
 
-Bound parameters: `$1` = `"pending"`
+Bound parameters: `$1` = `"pending"`, `$2` = `10`
 
-<sub>Parameterised: <code>SELECT "id", "total" FROM "orders" WHERE "status" = $1 ORDER BY "placed_at" ASC LIMIT 10 FOR UPDATE SKIP LOCKED</code></sub>
+<sub>Parameterised: <code>SELECT "id", "total" FROM "orders" WHERE "status" = $1 ORDER BY "placed_at" ASC LIMIT $2 FOR UPDATE SKIP LOCKED</code></sub>
 
 ---
 
@@ -1083,9 +1087,9 @@ LIMIT 20
 OFFSET 20
 ```
 
-Bound parameters: `$1` = `true`, `$2` = `"engineering"`, `$3` = `"%@example.com"`
+Bound parameters: `$1` = `true`, `$2` = `"engineering"`, `$3` = `"%@example.com"`, `$4` = `20`, `$5` = `20`
 
-<sub>Parameterised: <code>SELECT "id", "name", "email", "department" FROM "users" WHERE (("active" = $1 AND "department" = $2) AND "email" LIKE $3) ORDER BY "created_at" DESC LIMIT 20 OFFSET 20</code></sub>
+<sub>Parameterised: <code>SELECT "id", "name", "email", "department" FROM "users" WHERE (("active" = $1 AND "department" = $2) AND "email" LIKE $3) ORDER BY "created_at" DESC LIMIT $4 OFFSET $5</code></sub>
 
 ---
 
@@ -1109,9 +1113,9 @@ WHERE ("active" = TRUE AND "age" < 30)
 LIMIT 10
 ```
 
-Bound parameters: `$1` = `true`, `$2` = `30`
+Bound parameters: `$1` = `true`, `$2` = `30`, `$3` = `10`
 
-<sub>Parameterised: <code>SELECT * FROM "users" WHERE ("active" = $1 AND "age" < $2) LIMIT 10</code></sub>
+<sub>Parameterised: <code>SELECT * FROM "users" WHERE ("active" = $1 AND "age" < $2) LIMIT $3</code></sub>
 
 ---
 

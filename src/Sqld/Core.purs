@@ -367,8 +367,8 @@ type Query =
   , groupBy  :: Array GroupingElement
   , having   :: Maybe Expr
   , orderBy  :: Array OrderExpr
-  , limit    :: Maybe Int
-  , offset   :: Maybe Int
+  , limit    :: Maybe Expr
+  , offset   :: Maybe Expr
   , locking  :: Array Locking
   }
 
