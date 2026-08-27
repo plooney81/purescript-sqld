@@ -713,7 +713,7 @@ import Sqld.Format (formatInsert, formatInsertInline)
 import Sqld.Select (cols, insertInto, onConflictUpdate, returning, values)
 
 -- INSERT INTO "users" ("name", "email") VALUES ($1, $2)
---   ON CONFLICT ("email") DO UPDATE SET "name" = "EXCLUDED"."name"
+--   ON CONFLICT ("email") DO UPDATE SET "name" = "excluded"."name"
 --   RETURNING "id", "name"
 fq = formatInsert $
   insertInto "users" ["name", "email"]
@@ -736,7 +736,7 @@ Two expression helpers support INSERT specifically:
 | Helper | Example | SQL |
 |---|---|---|
 | `default_ :: Expr` | `default_` | `DEFAULT` |
-| `excluded :: String -> Expr` | `excluded "name"` | `"EXCLUDED"."name"` |
+| `excluded :: String -> Expr` | `excluded "name"` | `"excluded"."name"` |
 
 `default_` requests the column's default value in a `VALUES` row. `excluded`
 references the value the INSERT proposed, inside an `ON CONFLICT DO UPDATE SET`

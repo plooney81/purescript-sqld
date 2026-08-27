@@ -66,10 +66,10 @@ default_ :: Expr
 default_ = Default
 
 -- | A reference to a column of the row proposed for insertion:
--- | `excluded "name"` renders `"EXCLUDED"."name"`. Only meaningful inside an
+-- | `excluded "name"` renders `"excluded"."name"`. Only meaningful inside an
 -- | `ON CONFLICT DO UPDATE SET` assignment.
 excluded :: String -> Expr
-excluded column = Col ({ table: Just "EXCLUDED", column } :: ColumnRef)
+excluded column = Col ({ table: Just "excluded", column } :: ColumnRef)
 
 -- ---------------------------------------------------------------------------
 -- Generic constructors

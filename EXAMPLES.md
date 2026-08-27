@@ -1203,10 +1203,10 @@ upsert =
 ```sql
 INSERT INTO "users" ("name", "email")
 VALUES ('Alice', 'alice@example.com')
-ON CONFLICT ("email") DO UPDATE SET "name" = "EXCLUDED"."name"
+ON CONFLICT ("email") DO UPDATE SET "name" = "excluded"."name"
 RETURNING "id", "name"
 ```
 
 Bound parameters: `$1` = `"Alice"`, `$2` = `"alice@example.com"`
 
-<sub>Parameterised: <code>INSERT INTO "users" ("name", "email") VALUES ($1, $2) ON CONFLICT ("email") DO UPDATE SET "name" = "EXCLUDED"."name" RETURNING "id", "name"</code></sub>
+<sub>Parameterised: <code>INSERT INTO "users" ("name", "email") VALUES ($1, $2) ON CONFLICT ("email") DO UPDATE SET "name" = "excluded"."name" RETURNING "id", "name"</code></sub>

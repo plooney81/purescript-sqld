@@ -72,7 +72,7 @@ insertSpec = describe "INSERT" do
             # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
             # formatInsertInline
       sql `shouldEqual`
-        "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com') ON CONFLICT (\"email\") DO UPDATE SET \"name\" = \"EXCLUDED\".\"name\""
+        "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com') ON CONFLICT (\"email\") DO UPDATE SET \"name\" = \"excluded\".\"name\""
 
   describe "RETURNING" do
     it "returns specific columns" do
@@ -107,5 +107,5 @@ insertSpec = describe "INSERT" do
             # returning (cols ["id", "name"])
             # formatInsert
       fq.sql `shouldEqual`
-        "INSERT INTO \"users\" (\"name\", \"email\") VALUES ($1, $2) ON CONFLICT (\"email\") DO UPDATE SET \"name\" = \"EXCLUDED\".\"name\" RETURNING \"id\", \"name\""
+        "INSERT INTO \"users\" (\"name\", \"email\") VALUES ($1, $2) ON CONFLICT (\"email\") DO UPDATE SET \"name\" = \"excluded\".\"name\" RETURNING \"id\", \"name\""
       fq.params `shouldEqual` [LitString "Alice", LitString "alice@example.com"]
