@@ -21,9 +21,9 @@ import Node.Encoding (Encoding(..))
 import Node.FS.Perms (permsAll)
 import Node.FS.Sync (mkdir', writeTextFile)
 import Sqld.Core (Literal(..))
-import Example.Cookbook (Example, cookbook)
-import Sqld.Format (format, formatInline, formatPretty)
-import Test.Sqld.Corpus (CorpusEntry, corpus)
+import Example.Cookbook (Example, InsertExample, cookbook, insertCookbook)
+import Sqld.Format (format, formatInline, formatInsert, formatInsertInline, formatInsertPretty, formatPretty)
+import Test.Sqld.Corpus (CorpusEntry, InsertEntry, corpus, insertCorpus)
 
 corpusDir :: String
 corpusDir = "test-artifacts"
@@ -48,7 +48,7 @@ emitExamplesJson = do
   writeTextFile UTF8 examplesPath examplesJson
 
 examplesJson :: String
-examplesJson = "[\n" <> intercalate ",\n" (map exampleJson cookbook) <> "\n]\n"
+examplesJson = "[\n" <> intercalate ",\n" (map exampleJson cookbook <> map insertExampleJson insertCookbook) <> "\n]\n"
 
 exampleJson :: Example -> String
 exampleJson example =
@@ -64,8 +64,22 @@ exampleJson example =
   where
   formatted = format example.query
 
+insertExampleJson :: InsertExample -> String
+insertExampleJson example =
+  "  { \"name\": " <> jsonString example.name
+    <> ", \"sql\": "
+    <> jsonString formatted.sql
+    <> ", \"params\": ["
+    <> intercalate ", " (map literalJson formatted.params)
+    <> "]"
+    <> ", \"prettySql\": "
+    <> jsonString (formatInsertPretty example.insert)
+    <> " }"
+  where
+  formatted = formatInsert example.insert
+
 corpusJson :: String
-corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus) <> "\n]\n"
+corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus <> map insertEntryJson insertCorpus) <> "\n]\n"
 
 entryJson :: CorpusEntry -> String
 entryJson entry =
@@ -80,6 +94,20 @@ entryJson entry =
     <> " }"
   where
   formatted = format entry.query
+
+insertEntryJson :: InsertEntry -> String
+insertEntryJson entry =
+  "  { \"name\": " <> jsonString entry.name
+    <> ", \"sql\": "
+    <> jsonString formatted.sql
+    <> ", \"params\": ["
+    <> intercalate ", " (map literalJson formatted.params)
+    <> "]"
+    <> ", \"inlineSql\": "
+    <> jsonString (formatInsertInline entry.insert)
+    <> " }"
+  where
+  formatted = formatInsert entry.insert
 
 literalJson :: Literal -> String
 literalJson = case _ of

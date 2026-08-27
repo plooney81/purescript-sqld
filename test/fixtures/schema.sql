@@ -16,7 +16,7 @@ CREATE SCHEMA public;
 CREATE TABLE users
   ( id          integer PRIMARY KEY
   , name        text NOT NULL
-  , email       text
+  , email       text UNIQUE
   , active      boolean NOT NULL DEFAULT true
   , age         integer
   , score       numeric

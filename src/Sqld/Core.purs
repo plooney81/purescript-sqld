@@ -2,6 +2,7 @@ module Sqld.Core where
 
 import Prelude
 import Data.Maybe (Maybe(..))
+import Data.Tuple (Tuple)
 
 -- | The fixed SQL keyword a value renders as.
 -- |
@@ -84,6 +85,10 @@ data Expr
   -- | it.
   | Filter Expr Expr
   | Raw String
+  -- | The `DEFAULT` keyword, valid in a `VALUES` row to request the column's
+  -- | default value. Not a literal — it carries no binding and is emitted as a
+  -- | bare keyword.
+  | Default
 
 data Literal
   = LitInt Int
@@ -405,6 +410,48 @@ emptyQuery =
   , limit:    Nothing
   , offset:   Nothing
   , locking:  []
+  }
+
+-- ---------------------------------------------------------------------------
+-- INSERT
+-- ---------------------------------------------------------------------------
+
+-- | Where the rows come from: literal `VALUES` rows, or a `SELECT`.
+data InsertSource
+  = InsertValues (Array (Array Expr))
+  | InsertQuery Query
+
+-- | How to resolve a uniqueness violation on `INSERT`.
+-- |
+-- | `DoNothing` skips the conflicting row. `DoUpdate` names the conflict
+-- | target — the columns of the unique constraint — and the assignments to
+-- | apply to the existing row. The assignment expressions may reference
+-- | `EXCLUDED."col"` for the value the `INSERT` proposed.
+data OnConflict
+  = DoNothing
+  | DoUpdate (Array String) (Array (Tuple String Expr))
+
+-- | An `INSERT` statement.
+-- |
+-- | `source` is the rows to insert — either literal `VALUES` rows or an
+-- | `INSERT … SELECT`. `onConflict` is PostgreSQL's upsert clause, and
+-- | `returning` projects columns from the inserted (or updated) rows back to
+-- | the caller, exactly as a `SELECT` list does.
+type Insert =
+  { table      :: String
+  , columns    :: Array String
+  , source     :: InsertSource
+  , onConflict :: Maybe OnConflict
+  , returning  :: Array SelectExpr
+  }
+
+emptyInsert :: String -> Array String -> Insert
+emptyInsert table columns =
+  { table
+  , columns
+  , source:     InsertValues []
+  , onConflict: Nothing
+  , returning:  []
   }
 
 type FormattedQuery =

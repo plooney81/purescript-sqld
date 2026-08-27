@@ -5,8 +5,8 @@ import Prelude
 import Data.Array (length, nub) as Array
 import Data.Foldable (for_)
 import Data.String as String
-import Sqld.Format (format, formatInline)
-import Test.Sqld.Corpus (corpus, missingTags)
+import Sqld.Format (format, formatInline, formatInsert, formatInsertInline)
+import Test.Sqld.Corpus (corpus, insertCorpus, missingTags)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual, shouldNotEqual)
 
@@ -36,4 +36,14 @@ corpusSpec = describe "Sqld.Corpus" do
       formatInline entry.query `shouldNotEqual` ""
       -- Every bound literal must have a placeholder and vice versa; a mismatch
       -- means `format` would hand the driver the wrong number of parameters.
+      placeholders `shouldEqual` Array.length formatted.params
+
+  describe "insert well-formedness" do
+    for_ insertCorpus \entry -> it entry.name do
+      let
+        formatted = formatInsert entry.insert
+        placeholders = Array.length (String.split (String.Pattern "$") formatted.sql) - 1
+
+      formatted.sql `shouldNotEqual` ""
+      formatInsertInline entry.insert `shouldNotEqual` ""
       placeholders `shouldEqual` Array.length formatted.params

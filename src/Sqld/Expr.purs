@@ -10,7 +10,7 @@ module Sqld.Expr where
 import Prelude (($), (+), (<<<))
 import Data.Maybe (Maybe(..))
 import Data.String as String
-import Sqld.Core (Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), OrderExpr, QuantOp(..), Query, Window, emptyWindow)
+import Sqld.Core (ColumnRef, Expr(..), Frame, FrameBound(..), FrameMode(..), Literal(..), OrderExpr, QuantOp(..), Query, Window, emptyWindow)
 
 -- ---------------------------------------------------------------------------
 -- Column references
@@ -59,6 +59,17 @@ null = Lit LitNull
 -- | caller owns both its correctness and its parenthesisation.
 raw :: String -> Expr
 raw = Raw
+
+-- | The `DEFAULT` keyword, for use in a `VALUES` row to request the column's
+-- | default value. PostgreSQL rejects it outside a `VALUES` list.
+default_ :: Expr
+default_ = Default
+
+-- | A reference to a column of the row proposed for insertion:
+-- | `excluded "name"` renders `"EXCLUDED"."name"`. Only meaningful inside an
+-- | `ON CONFLICT DO UPDATE SET` assignment.
+excluded :: String -> Expr
+excluded column = Col ({ table: Just "EXCLUDED", column } :: ColumnRef)
 
 -- ---------------------------------------------------------------------------
 -- Generic constructors

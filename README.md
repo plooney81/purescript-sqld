@@ -68,10 +68,10 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `emptyQuery`, `emptyWindow`, `Keyword` |
-| `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries |
-| `Sqld.Select` | SELECT query builders and select-list helpers |
-| `Sqld.Format` | `format`, `formatInline`, `formatPretty` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Insert`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `InsertSource`, `OnConflict`, `emptyQuery`, `emptyInsert`, `emptyWindow`, `Keyword` |
+| `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries, `default_`, `excluded` |
+| `Sqld.Select` | SELECT query builders, INSERT builders, and select-list helpers |
+| `Sqld.Format` | `format`, `formatInline`, `formatPretty`, `formatInsert`, `formatInsertInline`, `formatInsertPretty` |
 
 ## API
 
@@ -699,6 +699,56 @@ locking clause on a query that also uses `DISTINCT`, `GROUP BY`, `HAVING`, a
 window function or a set operation, and rejects one naming a relation that is
 not in the `FROM` list; those are rules it enforces itself rather than ones the
 types express.
+
+### INSERT
+
+Start with `insertInto` and pipe through the INSERT helpers from `Sqld.Select`.
+`formatInsert` produces a parameterised `FormattedQuery`, the same type `format`
+returns for SELECT queries:
+
+```purescript
+import Data.Tuple (Tuple(..))
+import Sqld.Expr (excluded, str)
+import Sqld.Format (formatInsert, formatInsertInline)
+import Sqld.Select (cols, insertInto, onConflictUpdate, returning, values)
+
+-- INSERT INTO "users" ("name", "email") VALUES ($1, $2)
+--   ON CONFLICT ("email") DO UPDATE SET "name" = "EXCLUDED"."name"
+--   RETURNING "id", "name"
+fq = formatInsert $
+  insertInto "users" ["name", "email"]
+    # values [[str "Alice", str "alice@example.com"]]
+    # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
+    # returning (cols ["id", "name"])
+```
+
+| Function | Description |
+|---|---|
+| `insertInto :: String -> Array String -> Insert` | Start an INSERT for a table and its columns |
+| `values :: Array (Array Expr) -> Insert -> Insert` | Supply literal rows |
+| `insertFrom :: Query -> Insert -> Insert` | `INSERT … SELECT` |
+| `onConflictDoNothing :: Insert -> Insert` | `ON CONFLICT DO NOTHING` |
+| `onConflictUpdate :: Array String -> Array (Tuple String Expr) -> Insert -> Insert` | `ON CONFLICT (…) DO UPDATE SET …` |
+| `returning :: Array SelectExpr -> Insert -> Insert` | `RETURNING …` |
+
+Two expression helpers support INSERT specifically:
+
+| Helper | Example | SQL |
+|---|---|---|
+| `default_ :: Expr` | `default_` | `DEFAULT` |
+| `excluded :: String -> Expr` | `excluded "name"` | `"EXCLUDED"."name"` |
+
+`default_` requests the column's default value in a `VALUES` row. `excluded`
+references the value the INSERT proposed, inside an `ON CONFLICT DO UPDATE SET`
+assignment.
+
+Formatting mirrors the SELECT API:
+
+| Function | Description |
+|---|---|
+| `formatInsert :: Insert -> FormattedQuery` | Parameterised (for drivers) |
+| `formatInsertInline :: Insert -> String` | Debug only — literals inlined |
+| `formatInsertPretty :: Insert -> String` | Debug only — multi-line |
 
 ### Formatting
 

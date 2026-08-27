@@ -14,7 +14,9 @@
 -- | queries, so a typo in a column name is a test failure — that is the point.
 module Test.Sqld.Corpus
   ( CorpusEntry
+  , InsertEntry
   , corpus
+  , insertCorpus
   , coveredTags
   , requiredTags
   , missingTags
@@ -25,12 +27,14 @@ import Prelude hiding (between, not, sub)
 import Data.Array ((:))
 import Data.Array (concatMap, difference, length, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust, maybe)
-import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
-import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, eqAny, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, orderBy, orderUsing, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Example.Cookbook (cookbook, insertCookbook) as Cookbook
+import Data.Tuple (Tuple(..))
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, default_, denseRank, eqAny, excluded, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, values, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
+type InsertEntry = { name :: String, insert :: Insert }
 
 -- | A window shared by more than one corpus entry, so a named `Window` is
 -- | exercised alongside the ones built inline.
@@ -1325,6 +1329,75 @@ handWritten =
   ]
 
 -- ---------------------------------------------------------------------------
+-- INSERT corpus
+-- ---------------------------------------------------------------------------
+
+insertCorpus :: Array InsertEntry
+insertCorpus = insertHandWritten <> map asInsertEntry Cookbook.insertCookbook
+  where
+  asInsertEntry e = { name: "example-" <> e.name, insert: e.insert }
+
+insertHandWritten :: Array InsertEntry
+insertHandWritten =
+  [ { name: "insert-values"
+    , insert: insertInto "users" ["name", "email"]
+        # values [[str "Alice", str "alice@example.com"]]
+    }
+
+  , { name: "insert-values-multi"
+    , insert: insertInto "users" ["name", "email"]
+        # values [ [str "Alice", str "a@example.com"]
+                  , [str "Bob", str "b@example.com"]
+                  ]
+    }
+
+  , { name: "insert-default"
+    , insert: insertInto "users" ["name", "email", "active"]
+        # values [[str "Alice", str "alice@example.com", default_]]
+    }
+
+  , { name: "insert-from-select"
+    , insert: insertInto "orders" ["user_id", "status", "total"]
+        # insertFrom
+            ( select' (cols ["user_id"] <> [expr (str "pending"), expr (int 0)])
+                # from "orders"
+                # where_ (col "status" .== str "draft")
+            )
+    }
+
+  , { name: "insert-on-conflict-do-nothing"
+    , insert: insertInto "users" ["name", "email"]
+        # values [[str "Alice", str "alice@example.com"]]
+        # onConflictDoNothing
+    }
+
+  , { name: "insert-on-conflict-do-update"
+    , insert: insertInto "users" ["name", "email"]
+        # values [[str "Alice", str "alice@example.com"]]
+        # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
+    }
+
+  , { name: "insert-returning"
+    , insert: insertInto "users" ["name", "email"]
+        # values [[str "Alice", str "alice@example.com"]]
+        # returning (cols ["id"])
+    }
+
+  , { name: "insert-returning-star"
+    , insert: insertInto "users" ["name", "email"]
+        # values [[str "Alice", str "alice@example.com"]]
+        # returning [star]
+    }
+
+  , { name: "insert-upsert-returning"
+    , insert: insertInto "users" ["name", "email"]
+        # values [[str "Alice", str "alice@example.com"]]
+        # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
+        # returning (cols ["id", "name"])
+    }
+  ]
+
+-- ---------------------------------------------------------------------------
 -- Coverage tagging
 -- ---------------------------------------------------------------------------
 --
@@ -1354,6 +1427,7 @@ exprTags e = case e of
   Over f w -> ("Expr.Over" : exprTags f) <> windowTags w
   Filter agg predicate -> node "Expr.Filter" [ agg, predicate ]
   Raw _ -> [ "Expr.Raw" ]
+  Default -> [ "Expr.Default" ]
   where
   node tag kids = tag : Array.concatMap exprTags kids
   nodes tags kids = tags <> Array.concatMap exprTags kids
@@ -1545,9 +1619,30 @@ queryTags q =
 
   clause tag inner isEmpty = if isEmpty then [] else tag : inner
 
+insertTags :: Insert -> Array String
+insertTags i =
+  [ "Insert" ]
+    <> sourceTags i.source
+    <> onConflictTags i.onConflict
+    <> (if Array.null i.returning then [] else "Insert.returning" : Array.concatMap selectTags i.returning)
+  where
+  sourceTags (InsertValues rows) =
+    "Insert.values" : Array.concatMap (Array.concatMap exprTags) rows
+  sourceTags (InsertQuery q) =
+    "Insert.fromSelect" : queryTags q
+
+  onConflictTags Nothing = []
+  onConflictTags (Just DoNothing) = [ "Insert.onConflict", "OnConflict.DoNothing" ]
+  onConflictTags (Just (DoUpdate _ assignments)) =
+    [ "Insert.onConflict", "OnConflict.DoUpdate" ]
+      <> Array.concatMap (\(Tuple _ e) -> exprTags e) assignments
+
 -- | Every feature tag the corpus actually exercises.
 coveredTags :: Array String
-coveredTags = Array.sort (Array.nub (Array.concatMap (\e -> queryTags e.query) corpus))
+coveredTags = Array.sort (Array.nub (queryCovers <> insertCovers))
+  where
+  queryCovers = Array.concatMap (\e -> queryTags e.query) corpus
+  insertCovers = Array.concatMap (\e -> insertTags e.insert) insertCorpus
 
 -- | Every feature tag the corpus is required to exercise. Keep in sync with
 -- | `Sqld.Core` — a new constructor belongs here and in a corpus entry.
@@ -1595,6 +1690,14 @@ requiredTags = Array.sort
   , "Expr.Quantified.ANY"
   , "Expr.Quantified.ALL"
   , "Expr.Raw"
+  , "Expr.Default"
+  , "Insert"
+  , "Insert.values"
+  , "Insert.fromSelect"
+  , "Insert.onConflict"
+  , "Insert.returning"
+  , "OnConflict.DoNothing"
+  , "OnConflict.DoUpdate"
   , "Window.partitionBy"
   , "Window.orderBy"
   , "Window.frame"
