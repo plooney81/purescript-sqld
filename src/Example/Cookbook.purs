@@ -613,6 +613,19 @@ rawEscapeHatch =
     # from "users"
     # where_ (raw "\"created_at\" > NOW() - INTERVAL '30 days'")
 
+-- #example upsert
+-- # Upsert
+-- Insert a row, and if the unique constraint on `email` is violated, update
+-- the existing row instead. `excluded "name"` references the value the
+-- `INSERT` proposed. `returning` projects columns back to the caller, exactly
+-- as a `SELECT` list does.
+upsert :: Insert
+upsert =
+  insertInto "users" [ "name", "email" ]
+    # values [ [ str "Alice", str "alice@example.com" ] ]
+    # onConflictUpdate [ "email" ] [ Tuple "name" (excluded "name") ]
+    # returning (cols [ "id", "name" ])
+
 -- #end
 
 -- | Every example, in the order they appear in `EXAMPLES.md`.
@@ -652,21 +665,6 @@ cookbook =
   , { name: "merging-queries",      query: mergingQueries }
   , { name: "raw-escape-hatch",     query: rawEscapeHatch }
   ]
-
--- #example upsert
--- # Upsert
--- Insert a row, and if the unique constraint on `email` is violated, update
--- the existing row instead. `excluded "name"` references the value the
--- `INSERT` proposed. `returning` projects columns back to the caller, exactly
--- as a `SELECT` list does.
-upsert :: Insert
-upsert =
-  insertInto "users" [ "name", "email" ]
-    # values [ [ str "Alice", str "alice@example.com" ] ]
-    # onConflictUpdate [ "email" ] [ Tuple "name" (excluded "name") ]
-    # returning (cols [ "id", "name" ])
-
--- #end
 
 insertCookbook :: Array InsertExample
 insertCookbook =

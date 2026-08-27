@@ -49,6 +49,7 @@ Regenerate with `make examples`.
 - [Composing fragments](#composing-fragments)
 - [Merging independent queries](#merging-independent-queries)
 - [The raw escape hatch](#the-raw-escape-hatch)
+- [Upsert](#upsert)
 
 ---
 
@@ -1180,3 +1181,32 @@ WHERE "created_at" > NOW() - INTERVAL '30 days'
 ```
 
 <sub>Parameterised: <code>SELECT "id" AS "id", date_trunc('month', "created_at") AS "month" FROM "users" WHERE "created_at" > NOW() - INTERVAL '30 days'</code></sub>
+
+---
+
+## Upsert
+
+Insert a row, and if the unique constraint on `email` is violated, update
+the existing row instead. `excluded "name"` references the value the
+`INSERT` proposed. `returning` projects columns back to the caller, exactly
+as a `SELECT` list does.
+
+```purescript
+upsert :: Insert
+upsert =
+  insertInto "users" [ "name", "email" ]
+    # values [ [ str "Alice", str "alice@example.com" ] ]
+    # onConflictUpdate [ "email" ] [ Tuple "name" (excluded "name") ]
+    # returning (cols [ "id", "name" ])
+```
+
+```sql
+INSERT INTO "users" ("name", "email")
+VALUES ('Alice', 'alice@example.com')
+ON CONFLICT ("email") DO UPDATE SET "name" = "EXCLUDED"."name"
+RETURNING "id", "name"
+```
+
+Bound parameters: `$1` = `"Alice"`, `$2` = `"alice@example.com"`
+
+<sub>Parameterised: <code>INSERT INTO "users" ("name", "email") VALUES ($1, $2) ON CONFLICT ("email") DO UPDATE SET "name" = "EXCLUDED"."name" RETURNING "id", "name"</code></sub>
