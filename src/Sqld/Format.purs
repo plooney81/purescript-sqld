@@ -107,14 +107,13 @@ inlineLiteral LitNull        = "NULL"
 -- ---------------------------------------------------------------------------
 
 formatQuery :: Layout -> Query -> WithBindings String
-formatQuery layout q state0 = Tuple sql s3
+formatQuery layout q state0 = Tuple sql s5
   where
   Tuple withSql    s1 = formatWith    layout q.with    state0
   Tuple bodySql    s2 = formatBody    layout q         s1
   Tuple orderBySql s3 = formatOrderBy layout q.orderBy s2
-
-  limitSql   = formatLimit   q.limit
-  offsetSql  = formatOffset  q.offset
+  Tuple limitSql   s4 = formatLimit   layout q.limit   s3
+  Tuple offsetSql  s5 = formatOffset  layout q.offset  s4
   lockingSql = formatLocking layout q.locking
 
   parts = Array.filter (_ /= mempty)
@@ -329,13 +328,17 @@ formatOrderExpr layout { expr, dir } state = Tuple (sql <> " " <> dirSql) s'
 
   dirSql = keyword dir
 
-formatLimit :: Maybe Int -> String
-formatLimit Nothing  = mempty
-formatLimit (Just n) = "LIMIT " <> show n
+formatLimit :: Layout -> Maybe Expr -> WithBindings String
+formatLimit _ Nothing       state = Tuple mempty state
+formatLimit layout (Just e) state = Tuple ("LIMIT " <> sql) s'
+  where
+  Tuple sql s' = formatExpr layout e state
 
-formatOffset :: Maybe Int -> String
-formatOffset Nothing  = mempty
-formatOffset (Just n) = "OFFSET " <> show n
+formatOffset :: Layout -> Maybe Expr -> WithBindings String
+formatOffset _ Nothing       state = Tuple mempty state
+formatOffset layout (Just e) state = Tuple ("OFFSET " <> sql) s'
+  where
+  Tuple sql s' = formatExpr layout e state
 
 -- | The locking clauses, last of all — after `LIMIT` and `OFFSET`, which is
 -- | where SQL puts them. Each is a clause in its own right, so a pretty layout

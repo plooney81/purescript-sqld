@@ -116,8 +116,11 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `groupByElements :: Array GroupingElement -> Query -> Query` | General form; appends any grouping elements |
 | `having :: Expr -> Query -> Query` | HAVING |
 | `orderBy :: Array OrderExpr -> Query -> Query` | ORDER BY |
-| `limit :: Int -> Query -> Query` | LIMIT |
-| `offset :: Int -> Query -> Query` | OFFSET |
+| `limit :: Int -> Query -> Query` | `LIMIT n` (parameterised) |
+| `limitExpr :: Expr -> Query -> Query` | `LIMIT` with an arbitrary expression |
+| `limitAll :: Query -> Query` | `LIMIT ALL` |
+| `offset :: Int -> Query -> Query` | `OFFSET n` (parameterised) |
+| `offsetExpr :: Expr -> Query -> Query` | `OFFSET` with an arbitrary expression |
 | `forUpdate` / `forNoKeyUpdate` / `forShare` / `forKeyShare` | `:: Query -> Query` — add a `FOR …` row-locking clause |
 | `lockRows :: LockStrength -> Query -> Query` | General form; appends a locking clause of any strength |
 | `lockOf :: Array String -> Query -> Query` | `OF "a", "b"` — restrict the clause to those `FROM` items |

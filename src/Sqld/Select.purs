@@ -4,7 +4,7 @@ import Data.Array (length, modifyAt, null) as Array
 import Data.Maybe (Maybe(..), fromMaybe)
 import Prelude (identity, ($), (-), (<<<), (<>), map)
 import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
-import Sqld.Expr (col, tcol)
+import Sqld.Expr (col, int, tcol)
 
 -- ---------------------------------------------------------------------------
 -- Relations
@@ -386,11 +386,20 @@ groupByElements elements q = q { groupBy = q.groupBy <> elements }
 having :: Expr -> Query -> Query
 having e q = q { having = Just e }
 
+limitExpr :: Expr -> Query -> Query
+limitExpr e q = q { limit = Just e }
+
 limit :: Int -> Query -> Query
-limit n q = q { limit = Just n }
+limit = limitExpr <<< int
+
+limitAll :: Query -> Query
+limitAll q = q { limit = Just (Raw "ALL") }
+
+offsetExpr :: Expr -> Query -> Query
+offsetExpr e q = q { offset = Just e }
 
 offset :: Int -> Query -> Query
-offset n q = q { offset = Just n }
+offset = offsetExpr <<< int
 
 -- ---------------------------------------------------------------------------
 -- Row locking
