@@ -26,9 +26,9 @@ import Data.Array ((:))
 import Data.Array (concatMap, difference, length, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust, maybe)
 import Example.Cookbook (cookbook) as Cookbook
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
 import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, orderBy, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, orderBy, orderUsing, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 
@@ -496,6 +496,36 @@ handWritten =
     , query: select' [ star ]
         # from "users"
         # orderBy [ asc (col "department"), desc (col "created_at") ]
+    }
+
+  , { name: "order-by-desc-nulls-last"
+    , query: select' [ star ]
+        # from "articles"
+        # orderBy [ descNullsLast (col "published_at"), asc (col "title") ]
+    }
+
+  , { name: "order-by-asc-nulls-first"
+    , query: select' [ star ]
+        # from "users"
+        # orderBy [ ascNullsFirst (col "email") ]
+    }
+
+  , { name: "order-by-desc-nulls-first"
+    , query: select' [ star ]
+        # from "users"
+        # orderBy [ descNullsFirst (col "score") ]
+    }
+
+  , { name: "order-by-asc-nulls-last"
+    , query: select' [ star ]
+        # from "users"
+        # orderBy [ ascNullsLast (col "email") ]
+    }
+
+  , { name: "order-by-using"
+    , query: select' [ star ]
+        # from "users"
+        # orderBy [ orderUsing "<" (col "name") ]
     }
 
   , { name: "limit-offset"
@@ -1355,9 +1385,16 @@ orderDirTag :: OrderDir -> String
 orderDirTag = case _ of
   Asc -> "OrderDir.Asc"
   Desc -> "OrderDir.Desc"
+  OrderUsing _ -> "OrderDir.OrderUsing"
+
+nullOrderTag :: NullOrder -> String
+nullOrderTag = case _ of
+  NullsFirst -> "NullOrder.NullsFirst"
+  NullsLast -> "NullOrder.NullsLast"
 
 orderTags :: OrderExpr -> Array String
-orderTags o = orderDirTag o.dir : exprTags o.expr
+orderTags o = (orderDirTag o.dir : exprTags o.expr)
+  <> maybe [] (\n -> [nullOrderTag n]) o.nulls
 
 relationTags :: String -> Relation -> Array String
 relationTags prefix (Table _ alias) = case alias of
@@ -1517,8 +1554,11 @@ requiredTags = Array.sort
   , "JoinCondition.Using"
   , "JoinCondition.Natural"
   , "JoinCondition.Cross"
+  , "NullOrder.NullsFirst"
+  , "NullOrder.NullsLast"
   , "OrderDir.Asc"
   , "OrderDir.Desc"
+  , "OrderDir.OrderUsing"
   , "Query.with"
   , "Query.with.columns"
   , "Query.with.recursive"

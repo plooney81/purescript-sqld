@@ -116,6 +116,9 @@ Start with `select'` and pipe through helpers from `Sqld.Select`. Reach for
 | `groupByElements :: Array GroupingElement -> Query -> Query` | General form; appends any grouping elements |
 | `having :: Expr -> Query -> Query` | HAVING |
 | `orderBy :: Array OrderExpr -> Query -> Query` | ORDER BY |
+| `ascNullsFirst` / `ascNullsLast` | `:: Expr -> OrderExpr` — null ordering for `ASC` |
+| `descNullsFirst` / `descNullsLast` | `:: Expr -> OrderExpr` — null ordering for `DESC` |
+| `orderUsing :: String -> Expr -> OrderExpr` | `USING <operator>` — custom operator ordering |
 | `limit :: Int -> Query -> Query` | `LIMIT n` (parameterised) |
 | `limitExpr :: Expr -> Query -> Query` | `LIMIT` with an arbitrary expression |
 | `limitAll :: Query -> Query` | `LIMIT ALL` |
@@ -605,6 +608,31 @@ right.
 orderBy [asc (col "name"), desc (col "created_at")]
 -- ORDER BY "name" ASC, "created_at" DESC
 ```
+
+Null ordering overrides PostgreSQL's default (`NULLS LAST` for `ASC`, `NULLS
+FIRST` for `DESC`):
+
+```purescript
+orderBy [descNullsLast (col "published_at"), ascNullsFirst (col "name")]
+-- ORDER BY "published_at" DESC NULLS LAST, "name" ASC NULLS FIRST
+```
+
+`USING` orders by a custom operator instead of `ASC` / `DESC`:
+
+```purescript
+orderBy [orderUsing "<" (col "name")]
+-- ORDER BY "name" USING <
+```
+
+| Builder | SQL |
+|---|---|
+| `asc` | `ASC` |
+| `desc` | `DESC` |
+| `ascNullsFirst` | `ASC NULLS FIRST` |
+| `ascNullsLast` | `ASC NULLS LAST` |
+| `descNullsFirst` | `DESC NULLS FIRST` |
+| `descNullsLast` | `DESC NULLS LAST` |
+| `orderUsing "<"` | `USING <` |
 
 ### Row locking
 

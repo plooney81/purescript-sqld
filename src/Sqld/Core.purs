@@ -132,13 +132,20 @@ type Join =
   , condition :: JoinCondition
   }
 
-data OrderDir = Asc | Desc
+data OrderDir = Asc | Desc | OrderUsing String
 
 instance Keyword OrderDir where
-  keyword Asc  = "ASC"
-  keyword Desc = "DESC"
+  keyword Asc            = "ASC"
+  keyword Desc           = "DESC"
+  keyword (OrderUsing op) = "USING " <> op
 
-type OrderExpr = { expr :: Expr, dir :: OrderDir }
+data NullOrder = NullsFirst | NullsLast
+
+instance Keyword NullOrder where
+  keyword NullsFirst = "NULLS FIRST"
+  keyword NullsLast  = "NULLS LAST"
+
+type OrderExpr = { expr :: Expr, dir :: OrderDir, nulls :: Maybe NullOrder }
 
 -- | The window a window function is evaluated over: the `(…)` of
 -- | `ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)`.
