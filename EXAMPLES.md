@@ -50,6 +50,7 @@ Regenerate with `make examples`.
 - [Merging independent queries](#merging-independent-queries)
 - [The raw escape hatch](#the-raw-escape-hatch)
 - [Upsert](#upsert)
+- [Update with FROM and RETURNING](#update-with-from-and-returning)
 
 ---
 
@@ -1210,3 +1211,42 @@ RETURNING "id", "name"
 Bound parameters: `$1` = `"Alice"`, `$2` = `"alice@example.com"`
 
 <sub>Parameterised: <code>INSERT INTO "users" ("name", "email") VALUES ($1, $2) ON CONFLICT ("email") DO UPDATE SET "name" = "excluded"."name" RETURNING "id", "name"</code></sub>
+
+---
+
+## Update with FROM and RETURNING
+
+`update` starts an UPDATE statement. `set` names the assignments — bare
+column names, because PostgreSQL rejects `SET "t"."c" = …`. `updateFrom`
+adds another table, whose columns the assignments and WHERE clause may
+reference — this is PostgreSQL's multi-table UPDATE, the counterpart of a
+join in a SELECT. `updateReturning` projects columns from the updated rows,
+exactly as a SELECT list does.
+
+An UPDATE with no WHERE is valid SQL and updates every row. The API does not
+prevent this: building an UPDATE without `updateWhere` is a deliberate
+statement, the same way `SELECT *` without a `WHERE` is.
+
+```purescript
+updateFromReturning :: Update
+updateFromReturning =
+  update "users"
+    # set [ Tuple "active" (bool false), Tuple "name" (str "Deactivated") ]
+    # updateFrom "orders"
+    # updateWhere (and [ col "orders.user_id" .== col "users.id"
+                       , col "orders.status" .== str "cancelled"
+                       ])
+    # updateReturning (cols [ "users.id", "users.name" ])
+```
+
+```sql
+UPDATE "users"
+SET "active" = FALSE, "name" = 'Deactivated'
+FROM "orders"
+WHERE ("orders"."user_id" = "users"."id" AND "orders"."status" = 'cancelled')
+RETURNING "users"."id", "users"."name"
+```
+
+Bound parameters: `$1` = `false`, `$2` = `"Deactivated"`, `$3` = `"cancelled"`
+
+<sub>Parameterised: <code>UPDATE "users" SET "active" = $1, "name" = $2 FROM "orders" WHERE ("orders"."user_id" = "users"."id" AND "orders"."status" = $3) RETURNING "users"."id", "users"."name"</code></sub>

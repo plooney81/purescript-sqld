@@ -68,10 +68,10 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Insert`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `InsertSource`, `OnConflict`, `emptyQuery`, `emptyInsert`, `emptyWindow`, `Keyword` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Insert`, `Update`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `InsertSource`, `OnConflict`, `emptyQuery`, `emptyInsert`, `emptyUpdate`, `emptyWindow`, `Keyword` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries, `default_`, `excluded` |
-| `Sqld.Select` | SELECT query builders, INSERT builders, and select-list helpers |
-| `Sqld.Format` | `format`, `formatInline`, `formatPretty`, `formatInsert`, `formatInsertInline`, `formatInsertPretty` |
+| `Sqld.Select` | SELECT query builders, INSERT builders, UPDATE builders, and select-list helpers |
+| `Sqld.Format` | `format`, `formatInline`, `formatPretty`, `formatInsert`, `formatInsertInline`, `formatInsertPretty`, `formatUpdateStmt`, `formatUpdateInline`, `formatUpdatePretty` |
 
 ## API
 
@@ -749,6 +749,49 @@ Formatting mirrors the SELECT API:
 | `formatInsert :: Insert -> FormattedQuery` | Parameterised (for drivers) |
 | `formatInsertInline :: Insert -> String` | Debug only — literals inlined |
 | `formatInsertPretty :: Insert -> String` | Debug only — multi-line |
+
+### UPDATE
+
+Start with `update` and pipe through the UPDATE helpers from `Sqld.Select`.
+`formatUpdateStmt` produces a parameterised `FormattedQuery`, the same type
+`format` returns for SELECT queries:
+
+```purescript
+import Data.Tuple (Tuple(..))
+import Sqld.Expr (col, int, str, (.==))
+import Sqld.Format (formatUpdateStmt)
+import Sqld.Select (cols, set, update, updateFrom, updateReturning, updateWhere)
+
+-- UPDATE "orders" SET "status" = $1, "total" = $2
+--   FROM "users"
+--   WHERE "orders"."user_id" = "users"."id" AND "users"."name" = $3
+--   RETURNING "orders"."id", "orders"."status"
+fq = formatUpdateStmt $
+  update "orders"
+    # set [Tuple "status" (str "shipped"), Tuple "total" (int 100)]
+    # updateFrom "users"
+    # updateWhere (col "orders.user_id" .== col "users.id")
+    # updateWhere (col "users.name" .== str "Alice")
+    # updateReturning (cols ["orders.id", "orders.status"])
+```
+
+| Function | Description |
+|---|---|
+| `update :: String -> Update` | Start an UPDATE for a table |
+| `set :: Array (Tuple String Expr) -> Update -> Update` | `SET col = expr, …` — assignment targets are bare column names |
+| `updateFrom :: String -> Update -> Update` | `FROM` — join another table for the update |
+| `updateWhere :: Expr -> Update -> Update` | `WHERE` (ANDs with any existing) |
+| `updateReturning :: Array SelectExpr -> Update -> Update` | `RETURNING …` |
+
+Parameters are numbered left to right: SET values first, then WHERE.
+
+Formatting mirrors the SELECT and INSERT APIs:
+
+| Function | Description |
+|---|---|
+| `formatUpdateStmt :: Update -> FormattedQuery` | Parameterised (for drivers) |
+| `formatUpdateInline :: Update -> String` | Debug only — literals inlined |
+| `formatUpdatePretty :: Update -> String` | Debug only — multi-line |
 
 ### Formatting
 

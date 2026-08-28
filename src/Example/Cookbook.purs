@@ -17,17 +17,19 @@
 module Example.Cookbook
   ( Example
   , InsertExample
+  , UpdateExample
   , cookbook
   , insertCookbook
+  , updateCookbook
   ) where
 
 import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Insert, JoinType(..), Query, Window, emptyQuery)
+import Sqld.Core (Insert, JoinType(..), Query, Update, Window, emptyQuery)
 import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, excluded, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, insertInto, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, onConflictUpdate, exprs, orderBy, returning, rightJoin, select, select', skipLocked, star, starFrom, tcols, unionAll, values, where_, withCte, with_)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, insertInto, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, onConflictUpdate, exprs, orderBy, returning, rightJoin, select, select', set, skipLocked, star, starFrom, tcols, unionAll, update, updateFrom, updateReturning, updateWhere, values, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -37,6 +39,11 @@ type Example =
 type InsertExample =
   { name   :: String
   , insert :: Insert
+  }
+
+type UpdateExample =
+  { name   :: String
+  , update :: Update
   }
 
 -- #example basic-filtering
@@ -626,6 +633,28 @@ upsert =
     # onConflictUpdate [ "email" ] [ Tuple "name" (excluded "name") ]
     # returning (cols [ "id", "name" ])
 
+-- #example update-from-returning
+-- # Update with FROM and RETURNING
+-- `update` starts an UPDATE statement. `set` names the assignments — bare
+-- column names, because PostgreSQL rejects `SET "t"."c" = …`. `updateFrom`
+-- adds another table, whose columns the assignments and WHERE clause may
+-- reference — this is PostgreSQL's multi-table UPDATE, the counterpart of a
+-- join in a SELECT. `updateReturning` projects columns from the updated rows,
+-- exactly as a SELECT list does.
+--
+-- An UPDATE with no WHERE is valid SQL and updates every row. The API does not
+-- prevent this: building an UPDATE without `updateWhere` is a deliberate
+-- statement, the same way `SELECT *` without a `WHERE` is.
+updateFromReturning :: Update
+updateFromReturning =
+  update "users"
+    # set [ Tuple "active" (bool false), Tuple "name" (str "Deactivated") ]
+    # updateFrom "orders"
+    # updateWhere (and [ col "orders.user_id" .== col "users.id"
+                       , col "orders.status" .== str "cancelled"
+                       ])
+    # updateReturning (cols [ "users.id", "users.name" ])
+
 -- #end
 
 -- | Every example, in the order they appear in `EXAMPLES.md`.
@@ -669,4 +698,9 @@ cookbook =
 insertCookbook :: Array InsertExample
 insertCookbook =
   [ { name: "upsert", insert: upsert }
+  ]
+
+updateCookbook :: Array UpdateExample
+updateCookbook =
+  [ { name: "update-from-returning", update: updateFromReturning }
   ]

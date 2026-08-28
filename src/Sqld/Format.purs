@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window, keyword)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Update, Window, keyword)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -633,3 +633,56 @@ formatReturning _ [] state = Tuple mempty state
 formatReturning layout exprs state = Tuple ("RETURNING " <> intercalate ", " parts) s'
   where
   Tuple parts s' = mapAccum (formatSelectExpr layout) state exprs
+
+-- ---------------------------------------------------------------------------
+-- UPDATE
+-- ---------------------------------------------------------------------------
+
+formatUpdateStmt :: Update -> FormattedQuery
+formatUpdateStmt u = { sql, params: state.params }
+  where
+  Tuple sql state = formatUpdateSql Inline u emptyBindings
+
+formatUpdateInline :: Update -> String
+formatUpdateInline = inlineUpdateWith Inline
+
+formatUpdatePretty :: Update -> String
+formatUpdatePretty = inlineUpdateWith (Pretty 0)
+
+inlineUpdateWith :: Layout -> Update -> String
+inlineUpdateWith layout u = foldl substitute sql subs
+  where
+  Tuple sql state = formatUpdateSql layout u emptyBindings
+
+  subs = Array.reverse (Array.mapWithIndex (\idx l -> Tuple (idx + 1) l) state.params)
+
+  substitute acc (Tuple idx l) =
+    String.replaceAll
+      (String.Pattern ("$" <> show idx))
+      (String.Replacement (inlineLiteral l))
+      acc
+
+formatUpdateSql :: Layout -> Update -> WithBindings String
+formatUpdateSql layout u state0 = Tuple sql s4
+  where
+  intro = "UPDATE " <> quoteIdent u.table
+
+  Tuple setSql       s1 = formatSetClause  layout u.set       state0
+  Tuple fromSql      s2 = formatUpdateFrom layout u.from      s1
+  Tuple whereSql     s3 = formatWhere      layout u.where_    s2
+  Tuple returningSql s4 = formatReturning  layout u.returning  s3
+
+  parts = Array.filter (_ /= mempty)
+    [ intro, setSql, fromSql, whereSql, returningSql ]
+
+  sql = intercalate (clauseSep layout) parts
+
+formatSetClause :: Layout -> Array (Tuple String Expr) -> WithBindings String
+formatSetClause _ [] state = Tuple mempty state
+formatSetClause layout assignments state = Tuple ("SET " <> assignmentSql) s'
+  where
+  Tuple assignmentSql s' = formatAssignments layout assignments state
+
+formatUpdateFrom :: Layout -> Maybe String -> WithBindings String
+formatUpdateFrom _ Nothing      state = Tuple mempty state
+formatUpdateFrom _ (Just table) state = Tuple ("FROM " <> quoteIdent table) state
