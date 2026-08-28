@@ -9,6 +9,7 @@ import Test.Sqld.CorpusEmit (emitCorpusJson, emitExamplesJson)
 import Test.Sqld.CorpusSpec (corpusSpec)
 import Test.Sqld.ExprSpec (exprSpec)
 import Test.Sqld.FormatSpec (formatSpec)
+import Test.Sqld.InsertSpec (insertSpec)
 import Test.Sqld.SelectSpec (selectSpec)
 
 main :: Effect Unit
@@ -21,4 +22,5 @@ main = do
     exprSpec
     selectSpec
     formatSpec
+    insertSpec
     corpusSpec

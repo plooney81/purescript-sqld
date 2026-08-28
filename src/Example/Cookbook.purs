@@ -16,19 +16,27 @@
 -- | `test/fixtures/schema.sql`.
 module Example.Cookbook
   ( Example
+  , InsertExample
   , cookbook
+  , insertCookbook
   ) where
 
 import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
-import Sqld.Core (JoinType(..), Query, Window, emptyQuery)
-import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, exprs, orderBy, rightJoin, select, select', skipLocked, star, starFrom, tcols, unionAll, where_, withCte, with_)
+import Data.Tuple (Tuple(..))
+import Sqld.Core (Insert, JoinType(..), Query, Window, emptyQuery)
+import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, excluded, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, insertInto, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, onConflictUpdate, exprs, orderBy, returning, rightJoin, select, select', skipLocked, star, starFrom, tcols, unionAll, values, where_, withCte, with_)
 
 type Example =
   { name  :: String
   , query :: Query
+  }
+
+type InsertExample =
+  { name   :: String
+  , insert :: Insert
   }
 
 -- #example basic-filtering
@@ -605,6 +613,19 @@ rawEscapeHatch =
     # from "users"
     # where_ (raw "\"created_at\" > NOW() - INTERVAL '30 days'")
 
+-- #example upsert
+-- # Upsert
+-- Insert a row, and if the unique constraint on `email` is violated, update
+-- the existing row instead. `excluded "name"` references the value the
+-- `INSERT` proposed. `returning` projects columns back to the caller, exactly
+-- as a `SELECT` list does.
+upsert :: Insert
+upsert =
+  insertInto "users" [ "name", "email" ]
+    # values [ [ str "Alice", str "alice@example.com" ] ]
+    # onConflictUpdate [ "email" ] [ Tuple "name" (excluded "name") ]
+    # returning (cols [ "id", "name" ])
+
 -- #end
 
 -- | Every example, in the order they appear in `EXAMPLES.md`.
@@ -643,4 +664,9 @@ cookbook =
   , { name: "composing-fragments",  query: composingFragments }
   , { name: "merging-queries",      query: mergingQueries }
   , { name: "raw-escape-hatch",     query: rawEscapeHatch }
+  ]
+
+insertCookbook :: Array InsertExample
+insertCookbook =
+  [ { name: "upsert", insert: upsert }
   ]

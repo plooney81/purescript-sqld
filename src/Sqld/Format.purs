@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Join, JoinCondition(..), Literal(..), Locking, OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window, keyword)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Window, keyword)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -476,6 +476,7 @@ formatExpr layout (Filter e predicate) state =
   Tuple aggSql       s1 = formatChild layout atomPrec e state
   Tuple predicateSql s2 = formatExpr layout predicate s1
 formatExpr _ (Raw sql) state = Tuple sql state
+formatExpr _ Default state = Tuple "DEFAULT" state
 
 -- ---------------------------------------------------------------------------
 -- Windows
@@ -551,3 +552,84 @@ mapAccum f s0 xs = foldl step (Tuple [] s0) xs
 quoteIdent :: String -> String
 quoteIdent ident =
   "\"" <> String.replaceAll (String.Pattern "\"") (String.Replacement "\"\"") ident <> "\""
+
+-- ---------------------------------------------------------------------------
+-- INSERT
+-- ---------------------------------------------------------------------------
+
+formatInsert :: Insert -> FormattedQuery
+formatInsert i = { sql, params: state.params }
+  where
+  Tuple sql state = formatInsertSql Inline i emptyBindings
+
+formatInsertInline :: Insert -> String
+formatInsertInline = inlineInsertWith Inline
+
+formatInsertPretty :: Insert -> String
+formatInsertPretty = inlineInsertWith (Pretty 0)
+
+inlineInsertWith :: Layout -> Insert -> String
+inlineInsertWith layout i = foldl substitute sql subs
+  where
+  Tuple sql state = formatInsertSql layout i emptyBindings
+
+  subs = Array.reverse (Array.mapWithIndex (\idx l -> Tuple (idx + 1) l) state.params)
+
+  substitute acc (Tuple idx l) =
+    String.replaceAll
+      (String.Pattern ("$" <> show idx))
+      (String.Replacement (inlineLiteral l))
+      acc
+
+formatInsertSql :: Layout -> Insert -> WithBindings String
+formatInsertSql layout i state0 = Tuple sql s3
+  where
+  intro = "INSERT INTO " <> quoteIdent i.table
+    <> " (" <> intercalate ", " (map quoteIdent i.columns) <> ")"
+
+  Tuple sourceSql   s1 = formatInsertSource layout i.source   state0
+  Tuple conflictSql s2 = formatOnConflict   layout i.onConflict s1
+  Tuple returningSql s3 = formatReturning   layout i.returning  s2
+
+  parts = Array.filter (_ /= mempty)
+    [ intro, sourceSql, conflictSql, returningSql ]
+
+  sql = intercalate (clauseSep layout) parts
+
+formatInsertSource :: Layout -> InsertSource -> WithBindings String
+formatInsertSource layout (InsertValues rows) state =
+  Tuple ("VALUES " <> intercalate ", " parts) s'
+  where
+  Tuple parts s' = mapAccum (formatValuesRow layout) state rows
+formatInsertSource layout (InsertQuery q) state = formatQuery layout q state
+
+formatValuesRow :: Layout -> Array Expr -> WithBindings String
+formatValuesRow layout exprs state = Tuple ("(" <> intercalate ", " parts <> ")") s'
+  where
+  Tuple parts s' = mapAccum (formatExpr layout) state exprs
+
+formatOnConflict :: Layout -> Maybe OnConflict -> WithBindings String
+formatOnConflict _ Nothing state = Tuple mempty state
+formatOnConflict _ (Just DoNothing) state =
+  Tuple "ON CONFLICT DO NOTHING" state
+formatOnConflict layout (Just (DoUpdate targets assignments)) state =
+  Tuple ("ON CONFLICT (" <> targetSql <> ") DO UPDATE SET " <> assignmentSql) s'
+  where
+  targetSql = intercalate ", " (map quoteIdent targets)
+  Tuple assignmentSql s' = formatAssignments layout assignments state
+
+formatAssignments :: Layout -> Array (Tuple String Expr) -> WithBindings String
+formatAssignments layout assignments state = Tuple (intercalate ", " parts) s'
+  where
+  Tuple parts s' = mapAccum (formatAssignment layout) state assignments
+
+formatAssignment :: Layout -> Tuple String Expr -> WithBindings String
+formatAssignment layout (Tuple col expr) state = Tuple (quoteIdent col <> " = " <> exprSql) s'
+  where
+  Tuple exprSql s' = formatExpr layout expr state
+
+formatReturning :: Layout -> Array SelectExpr -> WithBindings String
+formatReturning _ [] state = Tuple mempty state
+formatReturning layout exprs state = Tuple ("RETURNING " <> intercalate ", " parts) s'
+  where
+  Tuple parts s' = mapAccum (formatSelectExpr layout) state exprs

@@ -3,7 +3,8 @@ module Sqld.Select where
 import Data.Array (length, modifyAt, null) as Array
 import Data.Maybe (Maybe(..), fromMaybe)
 import Prelude (identity, ($), (-), (<<<), (<>), map)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyQuery)
+import Data.Tuple (Tuple)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), Insert, InsertSource(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyInsert, emptyQuery)
 import Sqld.Expr (col, int, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -597,3 +598,26 @@ mergeQueries base override =
                 Just _  -> override.offset
   , locking:  base.locking <> override.locking
   }
+
+-- ---------------------------------------------------------------------------
+-- INSERT
+-- ---------------------------------------------------------------------------
+
+insertInto :: String -> Array String -> Insert
+insertInto = emptyInsert
+
+values :: Array (Array Expr) -> Insert -> Insert
+values rows i = i { source = InsertValues rows }
+
+insertFrom :: Query -> Insert -> Insert
+insertFrom q i = i { source = InsertQuery q }
+
+onConflictDoNothing :: Insert -> Insert
+onConflictDoNothing i = i { onConflict = Just DoNothing }
+
+onConflictUpdate :: Array String -> Array (Tuple String Expr) -> Insert -> Insert
+onConflictUpdate targets assignments i =
+  i { onConflict = Just (DoUpdate targets assignments) }
+
+returning :: Array SelectExpr -> Insert -> Insert
+returning exprs i = i { returning = exprs }
