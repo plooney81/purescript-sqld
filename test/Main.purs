@@ -11,6 +11,7 @@ import Test.Sqld.ExprSpec (exprSpec)
 import Test.Sqld.FormatSpec (formatSpec)
 import Test.Sqld.InsertSpec (insertSpec)
 import Test.Sqld.SelectSpec (selectSpec)
+import Test.Sqld.UpdateSpec (updateSpec)
 
 main :: Effect Unit
 main = do
@@ -23,4 +24,5 @@ main = do
     selectSpec
     formatSpec
     insertSpec
+    updateSpec
     corpusSpec

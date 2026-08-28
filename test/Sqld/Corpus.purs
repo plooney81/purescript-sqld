@@ -15,8 +15,10 @@
 module Test.Sqld.Corpus
   ( CorpusEntry
   , InsertEntry
+  , UpdateEntry
   , corpus
   , insertCorpus
+  , updateCorpus
   , coveredTags
   , requiredTags
   , missingTags
@@ -27,14 +29,15 @@ import Prelude hiding (between, not, sub)
 import Data.Array ((:))
 import Data.Array (concatMap, difference, length, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust, maybe)
-import Example.Cookbook (cookbook, insertCookbook) as Cookbook
+import Example.Cookbook (cookbook, insertCookbook, updateCookbook) as Cookbook
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyWindow)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, Window, emptyWindow)
 import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, default_, denseRank, eqAny, excluded, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, values, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', set, skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, update, updateFrom, updateReturning, updateWhere, values, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 type InsertEntry = { name :: String, insert :: Insert }
+type UpdateEntry = { name :: String, update :: Update }
 
 -- | A window shared by more than one corpus entry, so a named `Window` is
 -- | exercised alongside the ones built inline.
@@ -1398,6 +1401,63 @@ insertHandWritten =
   ]
 
 -- ---------------------------------------------------------------------------
+-- UPDATE corpus
+-- ---------------------------------------------------------------------------
+
+updateCorpus :: Array UpdateEntry
+updateCorpus = updateHandWritten <> map asUpdateEntry Cookbook.updateCookbook
+  where
+  asUpdateEntry e = { name: "example-" <> e.name, update: e.update }
+
+updateHandWritten :: Array UpdateEntry
+updateHandWritten =
+  [ { name: "update-set"
+    , update: update "users"
+        # set [Tuple "active" (bool false)]
+        # updateWhere (col "id" .== int 1)
+    }
+
+  , { name: "update-set-multi"
+    , update: update "users"
+        # set [Tuple "active" (bool false), Tuple "name" (str "Bob")]
+        # updateWhere (col "id" .== int 1)
+    }
+
+  , { name: "update-from"
+    , update: update "users"
+        # set [Tuple "active" (bool false)]
+        # updateFrom "orders"
+        # updateWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
+                           , tcol "orders" "status" .== str "cancelled"
+                           ])
+    }
+
+  , { name: "update-returning"
+    , update: update "users"
+        # set [Tuple "active" (bool false)]
+        # updateWhere (col "id" .== int 1)
+        # updateReturning (cols ["id", "active"])
+    }
+
+  , { name: "update-returning-star"
+    , update: update "users"
+        # set [Tuple "active" (bool false)]
+        # updateWhere (col "id" .== int 1)
+        # updateReturning [star]
+    }
+
+  , { name: "update-full"
+    , update: update "users"
+        # set [Tuple "active" (bool false), Tuple "name" (str "Bob")]
+        # updateFrom "orders"
+        # updateWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
+                           , tcol "orders" "status" .== str "cancelled"
+                           ])
+        # updateReturning (cols ["users.id"])
+    }
+  ]
+
+-- ---------------------------------------------------------------------------
 -- Coverage tagging
 -- ---------------------------------------------------------------------------
 --
@@ -1637,12 +1697,21 @@ insertTags i =
     [ "Insert.onConflict", "OnConflict.DoUpdate" ]
       <> Array.concatMap (\(Tuple _ e) -> exprTags e) assignments
 
+updateTags :: Update -> Array String
+updateTags u =
+  [ "Update" ]
+    <> (if Array.null u.set then [] else "Update.set" : Array.concatMap (\(Tuple _ e) -> exprTags e) u.set)
+    <> maybe [] (\_ -> [ "Update.from" ]) u.from
+    <> maybe [] (\e -> "Update.where" : exprTags e) u.where_
+    <> (if Array.null u.returning then [] else "Update.returning" : Array.concatMap selectTags u.returning)
+
 -- | Every feature tag the corpus actually exercises.
 coveredTags :: Array String
-coveredTags = Array.sort (Array.nub (queryCovers <> insertCovers))
+coveredTags = Array.sort (Array.nub (queryCovers <> insertCovers <> updateCovers))
   where
   queryCovers = Array.concatMap (\e -> queryTags e.query) corpus
   insertCovers = Array.concatMap (\e -> insertTags e.insert) insertCorpus
+  updateCovers = Array.concatMap (\e -> updateTags e.update) updateCorpus
 
 -- | Every feature tag the corpus is required to exercise. Keep in sync with
 -- | `Sqld.Core` — a new constructor belongs here and in a corpus entry.
@@ -1772,6 +1841,11 @@ requiredTags = Array.sort
   , "LockStrength.ForKeyShare"
   , "LockWait.NoWait"
   , "LockWait.SkipLocked"
+  , "Update"
+  , "Update.set"
+  , "Update.from"
+  , "Update.where"
+  , "Update.returning"
   ]
 
 -- | Required tags with no corpus entry. Must be empty.

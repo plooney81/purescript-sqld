@@ -4,7 +4,7 @@ import Data.Array (length, modifyAt, null) as Array
 import Data.Maybe (Maybe(..), fromMaybe)
 import Prelude (identity, ($), (-), (<<<), (<>), map)
 import Data.Tuple (Tuple)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), Insert, InsertSource(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), emptyInsert, emptyQuery)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), Insert, InsertSource(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, emptyInsert, emptyQuery, emptyUpdate)
 import Sqld.Expr (col, int, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -621,3 +621,24 @@ onConflictUpdate targets assignments i =
 
 returning :: Array SelectExpr -> Insert -> Insert
 returning exprs i = i { returning = exprs }
+
+-- ---------------------------------------------------------------------------
+-- UPDATE
+-- ---------------------------------------------------------------------------
+
+update :: String -> Update
+update = emptyUpdate
+
+set :: Array (Tuple String Expr) -> Update -> Update
+set assignments u = u { set = assignments }
+
+updateFrom :: String -> Update -> Update
+updateFrom table u = u { from = Just table }
+
+updateWhere :: Expr -> Update -> Update
+updateWhere e u = u { where_ = Just $ case u.where_ of
+  Nothing   -> e
+  Just prev -> And [prev, e] }
+
+updateReturning :: Array SelectExpr -> Update -> Update
+updateReturning exprs u = u { returning = exprs }

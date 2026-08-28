@@ -454,6 +454,41 @@ emptyInsert table columns =
   , returning:  []
   }
 
+-- ---------------------------------------------------------------------------
+-- UPDATE
+-- ---------------------------------------------------------------------------
+
+-- | An `UPDATE` statement.
+-- |
+-- | `set` holds the column assignments — each a bare column name and an
+-- | expression. PostgreSQL rejects table-qualified targets (`SET "t"."c" = …`),
+-- | so the name is a plain `String`, not a `ColumnRef`.
+-- |
+-- | `from` is PostgreSQL's multi-table UPDATE syntax, which lets assignment
+-- | expressions and the `WHERE` clause reference other relations. `returning`
+-- | projects columns from the updated rows back to the caller, exactly as a
+-- | `SELECT` list does.
+-- |
+-- | An `UPDATE` with no `WHERE` is valid SQL and updates every row. The API
+-- | does not prevent this — it is a deliberate statement, the same way
+-- | `SELECT * FROM "t"` without a `WHERE` is — and PostgreSQL will execute it.
+type Update =
+  { table     :: String
+  , set       :: Array (Tuple String Expr)
+  , from      :: Maybe String
+  , where_    :: Maybe Expr
+  , returning :: Array SelectExpr
+  }
+
+emptyUpdate :: String -> Update
+emptyUpdate table =
+  { table
+  , set:       []
+  , from:      Nothing
+  , where_:    Nothing
+  , returning: []
+  }
+
 type FormattedQuery =
   { sql    :: String
   , params :: Array Literal
