@@ -7,6 +7,7 @@ import Test.Spec.Reporter (consoleReporter)
 import Test.Spec.Runner (runSpec)
 import Test.Sqld.CorpusEmit (emitCorpusJson, emitExamplesJson)
 import Test.Sqld.CorpusSpec (corpusSpec)
+import Test.Sqld.DeleteSpec (deleteSpec)
 import Test.Sqld.ExprSpec (exprSpec)
 import Test.Sqld.FormatSpec (formatSpec)
 import Test.Sqld.InsertSpec (insertSpec)
@@ -25,4 +26,5 @@ main = do
     formatSpec
     insertSpec
     updateSpec
+    deleteSpec
     corpusSpec

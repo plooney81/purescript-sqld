@@ -21,9 +21,9 @@ import Node.Encoding (Encoding(..))
 import Node.FS.Perms (permsAll)
 import Node.FS.Sync (mkdir', writeTextFile)
 import Sqld.Core (Literal(..))
-import Example.Cookbook (Example, InsertExample, UpdateExample, cookbook, insertCookbook, updateCookbook)
-import Sqld.Format (format, formatInline, formatInsert, formatInsertInline, formatInsertPretty, formatPretty, formatUpdateStmt, formatUpdateInline, formatUpdatePretty)
-import Test.Sqld.Corpus (CorpusEntry, InsertEntry, UpdateEntry, corpus, insertCorpus, updateCorpus)
+import Example.Cookbook (DeleteExample, Example, InsertExample, UpdateExample, cookbook, deleteCookbook, insertCookbook, updateCookbook)
+import Sqld.Format (format, formatDeleteInline, formatDeletePretty, formatDeleteStmt, formatInline, formatInsert, formatInsertInline, formatInsertPretty, formatPretty, formatUpdateStmt, formatUpdateInline, formatUpdatePretty)
+import Test.Sqld.Corpus (CorpusEntry, DeleteEntry, InsertEntry, UpdateEntry, corpus, deleteCorpus, insertCorpus, updateCorpus)
 
 corpusDir :: String
 corpusDir = "test-artifacts"
@@ -48,7 +48,7 @@ emitExamplesJson = do
   writeTextFile UTF8 examplesPath examplesJson
 
 examplesJson :: String
-examplesJson = "[\n" <> intercalate ",\n" (map exampleJson cookbook <> map insertExampleJson insertCookbook <> map updateExampleJson updateCookbook) <> "\n]\n"
+examplesJson = "[\n" <> intercalate ",\n" (map exampleJson cookbook <> map insertExampleJson insertCookbook <> map updateExampleJson updateCookbook <> map deleteExampleJson deleteCookbook) <> "\n]\n"
 
 exampleJson :: Example -> String
 exampleJson example =
@@ -79,7 +79,7 @@ insertExampleJson example =
   formatted = formatInsert example.insert
 
 corpusJson :: String
-corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus <> map insertEntryJson insertCorpus <> map updateEntryJson updateCorpus) <> "\n]\n"
+corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus <> map insertEntryJson insertCorpus <> map updateEntryJson updateCorpus <> map deleteEntryJson deleteCorpus) <> "\n]\n"
 
 entryJson :: CorpusEntry -> String
 entryJson entry =
@@ -123,6 +123,20 @@ updateExampleJson example =
   where
   formatted = formatUpdateStmt example.update
 
+deleteExampleJson :: DeleteExample -> String
+deleteExampleJson example =
+  "  { \"name\": " <> jsonString example.name
+    <> ", \"sql\": "
+    <> jsonString formatted.sql
+    <> ", \"params\": ["
+    <> intercalate ", " (map literalJson formatted.params)
+    <> "]"
+    <> ", \"prettySql\": "
+    <> jsonString (formatDeletePretty example.delete)
+    <> " }"
+  where
+  formatted = formatDeleteStmt example.delete
+
 updateEntryJson :: UpdateEntry -> String
 updateEntryJson entry =
   "  { \"name\": " <> jsonString entry.name
@@ -136,6 +150,20 @@ updateEntryJson entry =
     <> " }"
   where
   formatted = formatUpdateStmt entry.update
+
+deleteEntryJson :: DeleteEntry -> String
+deleteEntryJson entry =
+  "  { \"name\": " <> jsonString entry.name
+    <> ", \"sql\": "
+    <> jsonString formatted.sql
+    <> ", \"params\": ["
+    <> intercalate ", " (map literalJson formatted.params)
+    <> "]"
+    <> ", \"inlineSql\": "
+    <> jsonString (formatDeleteInline entry.delete)
+    <> " }"
+  where
+  formatted = formatDeleteStmt entry.delete
 
 literalJson :: Literal -> String
 literalJson = case _ of

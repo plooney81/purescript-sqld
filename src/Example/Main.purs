@@ -12,11 +12,16 @@ import Prelude
 import Data.Foldable (for_)
 import Effect (Effect)
 import Effect.Console (log)
-import Example.Cookbook (cookbook)
-import Sqld.Format (formatPretty)
+import Example.Cookbook (cookbook, deleteCookbook)
+import Sqld.Format (formatDeletePretty, formatPretty)
 
 main :: Effect Unit
-main = for_ cookbook \example -> do
-  log ("-- " <> example.name)
-  log (formatPretty example.query)
-  log ""
+main = do
+  for_ cookbook \example -> do
+    log ("-- " <> example.name)
+    log (formatPretty example.query)
+    log ""
+  for_ deleteCookbook \example -> do
+    log ("-- " <> example.name)
+    log (formatDeletePretty example.delete)
+    log ""

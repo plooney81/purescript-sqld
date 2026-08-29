@@ -51,6 +51,7 @@ Regenerate with `make examples`.
 - [The raw escape hatch](#the-raw-escape-hatch)
 - [Upsert](#upsert)
 - [Update with FROM and RETURNING](#update-with-from-and-returning)
+- [Delete with USING and RETURNING](#delete-with-using-and-returning)
 
 ---
 
@@ -1250,3 +1251,38 @@ RETURNING "users"."id", "users"."name"
 Bound parameters: `$1` = `false`, `$2` = `"Deactivated"`, `$3` = `"cancelled"`
 
 <sub>Parameterised: <code>UPDATE "users" SET "active" = $1, "name" = $2 FROM "orders" WHERE ("orders"."user_id" = "users"."id" AND "orders"."status" = $3) RETURNING "users"."id", "users"."name"</code></sub>
+
+---
+
+## Delete with USING and RETURNING
+
+`deleteFrom` starts a DELETE statement. `using` adds other tables, whose
+columns the WHERE clause may reference — this is PostgreSQL's multi-table
+DELETE, the counterpart of `FROM` in an UPDATE. `deleteReturning` projects
+columns from the deleted rows, exactly as a SELECT list does.
+
+A DELETE with no WHERE is valid SQL and removes every row. The API does not
+prevent this: building a DELETE without `deleteWhere` is a deliberate
+statement, the same way `UPDATE` without a `WHERE` is.
+
+```purescript
+deleteUsingReturning :: Delete
+deleteUsingReturning =
+  deleteFrom "orders"
+    # using [ "users" ]
+    # deleteWhere (and [ col "orders.user_id" .== col "users.id"
+                       , col "users.active" .== bool false
+                       ])
+    # deleteReturning (cols [ "orders.id" ])
+```
+
+```sql
+DELETE FROM "orders"
+USING "users"
+WHERE ("orders"."user_id" = "users"."id" AND "users"."active" = FALSE)
+RETURNING "orders"."id"
+```
+
+Bound parameters: `$1` = `false`
+
+<sub>Parameterised: <code>DELETE FROM "orders" USING "users" WHERE ("orders"."user_id" = "users"."id" AND "users"."active" = $1) RETURNING "orders"."id"</code></sub>

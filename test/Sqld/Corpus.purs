@@ -16,9 +16,11 @@ module Test.Sqld.Corpus
   ( CorpusEntry
   , InsertEntry
   , UpdateEntry
+  , DeleteEntry
   , corpus
   , insertCorpus
   , updateCorpus
+  , deleteCorpus
   , coveredTags
   , requiredTags
   , missingTags
@@ -29,15 +31,16 @@ import Prelude hiding (between, not, sub)
 import Data.Array ((:))
 import Data.Array (concatMap, difference, length, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust, maybe)
-import Example.Cookbook (cookbook, insertCookbook, updateCookbook) as Cookbook
+import Example.Cookbook (cookbook, deleteCookbook, insertCookbook, updateCookbook) as Cookbook
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, Window, emptyWindow)
+import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, Window, emptyWindow)
 import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, default_, denseRank, eqAny, excluded, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', set, skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, update, updateFrom, updateReturning, updateWhere, values, where_, with_, withCte, withRecursive)
+import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, deleteFrom, deleteReturning, deleteWhere, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', set, skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, with_, withCte, withRecursive)
 
 type CorpusEntry = { name :: String, query :: Query }
 type InsertEntry = { name :: String, insert :: Insert }
 type UpdateEntry = { name :: String, update :: Update }
+type DeleteEntry = { name :: String, delete :: Delete }
 
 -- | A window shared by more than one corpus entry, so a named `Window` is
 -- | exercised alongside the ones built inline.
@@ -1458,6 +1461,52 @@ updateHandWritten =
   ]
 
 -- ---------------------------------------------------------------------------
+-- DELETE corpus
+-- ---------------------------------------------------------------------------
+
+deleteCorpus :: Array DeleteEntry
+deleteCorpus = deleteHandWritten <> map asDeleteEntry Cookbook.deleteCookbook
+  where
+  asDeleteEntry e = { name: "example-" <> e.name, delete: e.delete }
+
+deleteHandWritten :: Array DeleteEntry
+deleteHandWritten =
+  [ { name: "delete-basic"
+    , delete: deleteFrom "orders"
+        # deleteWhere (col "status" .== str "cancelled")
+    }
+
+  , { name: "delete-using"
+    , delete: deleteFrom "orders"
+        # using ["users"]
+        # deleteWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
+                           , tcol "users" "active" .== bool false
+                           ])
+    }
+
+  , { name: "delete-returning"
+    , delete: deleteFrom "orders"
+        # deleteWhere (col "id" .== int 1)
+        # deleteReturning (cols ["id", "status"])
+    }
+
+  , { name: "delete-returning-star"
+    , delete: deleteFrom "orders"
+        # deleteWhere (col "id" .== int 1)
+        # deleteReturning [star]
+    }
+
+  , { name: "delete-full"
+    , delete: deleteFrom "orders"
+        # using ["users"]
+        # deleteWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
+                           , tcol "users" "active" .== bool false
+                           ])
+        # deleteReturning (cols ["orders.id"])
+    }
+  ]
+
+-- ---------------------------------------------------------------------------
 -- Coverage tagging
 -- ---------------------------------------------------------------------------
 --
@@ -1705,13 +1754,21 @@ updateTags u =
     <> maybe [] (\e -> "Update.where" : exprTags e) u.where_
     <> (if Array.null u.returning then [] else "Update.returning" : Array.concatMap selectTags u.returning)
 
+deleteTags :: Delete -> Array String
+deleteTags d =
+  [ "Delete" ]
+    <> (if Array.null d.using then [] else [ "Delete.using" ])
+    <> maybe [] (\e -> "Delete.where" : exprTags e) d.where_
+    <> (if Array.null d.returning then [] else "Delete.returning" : Array.concatMap selectTags d.returning)
+
 -- | Every feature tag the corpus actually exercises.
 coveredTags :: Array String
-coveredTags = Array.sort (Array.nub (queryCovers <> insertCovers <> updateCovers))
+coveredTags = Array.sort (Array.nub (queryCovers <> insertCovers <> updateCovers <> deleteCovers))
   where
   queryCovers = Array.concatMap (\e -> queryTags e.query) corpus
   insertCovers = Array.concatMap (\e -> insertTags e.insert) insertCorpus
   updateCovers = Array.concatMap (\e -> updateTags e.update) updateCorpus
+  deleteCovers = Array.concatMap (\e -> deleteTags e.delete) deleteCorpus
 
 -- | Every feature tag the corpus is required to exercise. Keep in sync with
 -- | `Sqld.Core` — a new constructor belongs here and in a corpus entry.
@@ -1846,6 +1903,10 @@ requiredTags = Array.sort
   , "Update.from"
   , "Update.where"
   , "Update.returning"
+  , "Delete"
+  , "Delete.using"
+  , "Delete.where"
+  , "Delete.returning"
   ]
 
 -- | Required tags with no corpus entry. Must be empty.

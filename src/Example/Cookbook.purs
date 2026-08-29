@@ -18,18 +18,20 @@ module Example.Cookbook
   ( Example
   , InsertExample
   , UpdateExample
+  , DeleteExample
   , cookbook
   , insertCookbook
   , updateCookbook
+  , deleteCookbook
   ) where
 
 import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Insert, JoinType(..), Query, Update, Window, emptyQuery)
+import Sqld.Core (Delete, Insert, JoinType(..), Query, Update, Window, emptyQuery)
 import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, excluded, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
-import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, insertInto, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, onConflictUpdate, exprs, orderBy, returning, rightJoin, select, select', set, skipLocked, star, starFrom, tcols, unionAll, update, updateFrom, updateReturning, updateWhere, values, where_, withCte, with_)
+import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, deleteFrom, deleteReturning, deleteWhere, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, insertInto, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, onConflictUpdate, exprs, orderBy, returning, rightJoin, select, select', set, skipLocked, star, starFrom, tcols, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, withCte, with_)
 
 type Example =
   { name  :: String
@@ -44,6 +46,11 @@ type InsertExample =
 type UpdateExample =
   { name   :: String
   , update :: Update
+  }
+
+type DeleteExample =
+  { name   :: String
+  , delete :: Delete
   }
 
 -- #example basic-filtering
@@ -655,6 +662,25 @@ updateFromReturning =
                        ])
     # updateReturning (cols [ "users.id", "users.name" ])
 
+-- #example delete-using-returning
+-- # Delete with USING and RETURNING
+-- `deleteFrom` starts a DELETE statement. `using` adds other tables, whose
+-- columns the WHERE clause may reference — this is PostgreSQL's multi-table
+-- DELETE, the counterpart of `FROM` in an UPDATE. `deleteReturning` projects
+-- columns from the deleted rows, exactly as a SELECT list does.
+--
+-- A DELETE with no WHERE is valid SQL and removes every row. The API does not
+-- prevent this: building a DELETE without `deleteWhere` is a deliberate
+-- statement, the same way `UPDATE` without a `WHERE` is.
+deleteUsingReturning :: Delete
+deleteUsingReturning =
+  deleteFrom "orders"
+    # using [ "users" ]
+    # deleteWhere (and [ col "orders.user_id" .== col "users.id"
+                       , col "users.active" .== bool false
+                       ])
+    # deleteReturning (cols [ "orders.id" ])
+
 -- #end
 
 -- | Every example, in the order they appear in `EXAMPLES.md`.
@@ -703,4 +729,9 @@ insertCookbook =
 updateCookbook :: Array UpdateExample
 updateCookbook =
   [ { name: "update-from-returning", update: updateFromReturning }
+  ]
+
+deleteCookbook :: Array DeleteExample
+deleteCookbook =
+  [ { name: "delete-using-returning", delete: deleteUsingReturning }
   ]
