@@ -56,8 +56,9 @@ await pool.query(query.sql, query.params);
 
 **[EXAMPLES.md](EXAMPLES.md)** is a worked cookbook — filtering, joins,
 aggregation, grouping sets, window functions, `DISTINCT ON`, subqueries,
-derived and lateral tables, common table expressions, composing fragments from
-optional parameters, and when to reach for `raw`.
+derived and lateral tables, common table expressions, INSERT with upsert,
+UPDATE with FROM and RETURNING, DELETE with USING and RETURNING, composing
+fragments from optional parameters, and when to reach for `raw`.
 
 It is generated from [`src/Example/Cookbook.purs`](src/Example/Cookbook.purs),
 and every example is replayed against a live PostgreSQL server by the
@@ -68,10 +69,10 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Insert`, `Update`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `InsertSource`, `OnConflict`, `emptyQuery`, `emptyInsert`, `emptyUpdate`, `emptyWindow`, `Keyword` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Insert`, `Update`, `Delete`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `InsertSource`, `OnConflict`, `emptyQuery`, `emptyInsert`, `emptyUpdate`, `emptyDelete`, `emptyWindow`, `Keyword` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries, `default_`, `excluded` |
-| `Sqld.Select` | SELECT query builders, INSERT builders, UPDATE builders, and select-list helpers |
-| `Sqld.Format` | `format`, `formatInline`, `formatPretty`, `formatInsert`, `formatInsertInline`, `formatInsertPretty`, `formatUpdateStmt`, `formatUpdateInline`, `formatUpdatePretty` |
+| `Sqld.Select` | SELECT query builders, INSERT builders, UPDATE builders, DELETE builders, and select-list helpers |
+| `Sqld.Format` | `format`, `formatInline`, `formatPretty`, `formatInsert`, `formatInsertInline`, `formatInsertPretty`, `formatUpdateStmt`, `formatUpdateInline`, `formatUpdatePretty`, `formatDeleteStmt`, `formatDeleteInline`, `formatDeletePretty` |
 
 ## API
 
@@ -792,6 +793,46 @@ Formatting mirrors the SELECT and INSERT APIs:
 | `formatUpdateStmt :: Update -> FormattedQuery` | Parameterised (for drivers) |
 | `formatUpdateInline :: Update -> String` | Debug only — literals inlined |
 | `formatUpdatePretty :: Update -> String` | Debug only — multi-line |
+
+### DELETE
+
+Start with `deleteFrom` and pipe through the DELETE helpers from `Sqld.Select`.
+`formatDeleteStmt` produces a parameterised `FormattedQuery`, the same type
+`format` returns for SELECT queries:
+
+```purescript
+import Sqld.Expr (and, bool, col, (.==))
+import Sqld.Format (formatDeleteStmt)
+import Sqld.Select (cols, deleteFrom, deleteReturning, deleteWhere, using)
+
+-- DELETE FROM "orders" USING "users"
+--   WHERE "orders"."user_id" = "users"."id" AND "users"."active" = $1
+--   RETURNING "orders"."id"
+fq = formatDeleteStmt $
+  deleteFrom "orders"
+    # using [ "users" ]
+    # deleteWhere (and [ col "orders.user_id" .== col "users.id"
+                       , col "users.active" .== bool false
+                       ])
+    # deleteReturning (cols [ "orders.id" ])
+```
+
+| Function | Description |
+|---|---|
+| `deleteFrom :: String -> Delete` | Start a DELETE for a table |
+| `using :: Array String -> Delete -> Delete` | `USING` — join other tables for the delete |
+| `deleteWhere :: Expr -> Delete -> Delete` | `WHERE` (ANDs with any existing) |
+| `deleteReturning :: Array SelectExpr -> Delete -> Delete` | `RETURNING …` |
+
+Parameters are numbered left to right: WHERE, then RETURNING.
+
+Formatting mirrors the SELECT, INSERT and UPDATE APIs:
+
+| Function | Description |
+|---|---|
+| `formatDeleteStmt :: Delete -> FormattedQuery` | Parameterised (for drivers) |
+| `formatDeleteInline :: Delete -> String` | Debug only — literals inlined |
+| `formatDeletePretty :: Delete -> String` | Debug only — multi-line |
 
 ### Formatting
 

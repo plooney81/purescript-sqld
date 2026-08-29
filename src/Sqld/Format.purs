@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Update, Window, keyword)
+import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Update, Window, keyword)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -686,3 +686,50 @@ formatSetClause layout assignments state = Tuple ("SET " <> assignmentSql) s'
 formatUpdateFrom :: Layout -> Maybe String -> WithBindings String
 formatUpdateFrom _ Nothing      state = Tuple mempty state
 formatUpdateFrom _ (Just table) state = Tuple ("FROM " <> quoteIdent table) state
+
+-- ---------------------------------------------------------------------------
+-- DELETE
+-- ---------------------------------------------------------------------------
+
+formatDeleteStmt :: Delete -> FormattedQuery
+formatDeleteStmt d = { sql, params: state.params }
+  where
+  Tuple sql state = formatDeleteSql Inline d emptyBindings
+
+formatDeleteInline :: Delete -> String
+formatDeleteInline = inlineDeleteWith Inline
+
+formatDeletePretty :: Delete -> String
+formatDeletePretty = inlineDeleteWith (Pretty 0)
+
+inlineDeleteWith :: Layout -> Delete -> String
+inlineDeleteWith layout d = foldl substitute sql subs
+  where
+  Tuple sql state = formatDeleteSql layout d emptyBindings
+
+  subs = Array.reverse (Array.mapWithIndex (\idx l -> Tuple (idx + 1) l) state.params)
+
+  substitute acc (Tuple idx l) =
+    String.replaceAll
+      (String.Pattern ("$" <> show idx))
+      (String.Replacement (inlineLiteral l))
+      acc
+
+formatDeleteSql :: Layout -> Delete -> WithBindings String
+formatDeleteSql layout d state0 = Tuple sql s3
+  where
+  intro = "DELETE FROM " <> quoteIdent d.table
+
+  Tuple usingSql     s1 = formatDeleteUsing layout d.using     state0
+  Tuple whereSql     s2 = formatWhere       layout d.where_    s1
+  Tuple returningSql s3 = formatReturning   layout d.returning s2
+
+  parts = Array.filter (_ /= mempty)
+    [ intro, usingSql, whereSql, returningSql ]
+
+  sql = intercalate (clauseSep layout) parts
+
+formatDeleteUsing :: Layout -> Array String -> WithBindings String
+formatDeleteUsing _ [] state = Tuple mempty state
+formatDeleteUsing _ tables state =
+  Tuple ("USING " <> intercalate ", " (map quoteIdent tables)) state

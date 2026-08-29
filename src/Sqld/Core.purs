@@ -489,6 +489,35 @@ emptyUpdate table =
   , returning: []
   }
 
+-- ---------------------------------------------------------------------------
+-- DELETE
+-- ---------------------------------------------------------------------------
+
+-- | A `DELETE` statement.
+-- |
+-- | `using` is PostgreSQL's multi-table DELETE syntax, which lets the `WHERE`
+-- | clause reference other relations — the counterpart of `FROM` in an
+-- | `UPDATE`. `returning` projects columns from the deleted rows back to the
+-- | caller, exactly as a `SELECT` list does.
+-- |
+-- | A `DELETE` with no `WHERE` is valid SQL and removes every row. The API
+-- | does not prevent this — it is a deliberate statement, the same way
+-- | `UPDATE` without a `WHERE` is — and PostgreSQL will execute it.
+type Delete =
+  { table     :: String
+  , using     :: Array String
+  , where_    :: Maybe Expr
+  , returning :: Array SelectExpr
+  }
+
+emptyDelete :: String -> Delete
+emptyDelete table =
+  { table
+  , using:     []
+  , where_:    Nothing
+  , returning: []
+  }
+
 type FormattedQuery =
   { sql    :: String
   , params :: Array Literal

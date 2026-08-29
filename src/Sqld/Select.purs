@@ -4,7 +4,7 @@ import Data.Array (length, modifyAt, null) as Array
 import Data.Maybe (Maybe(..), fromMaybe)
 import Prelude (identity, ($), (-), (<<<), (<>), map)
 import Data.Tuple (Tuple)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), GroupingElement(..), Insert, InsertSource(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, emptyInsert, emptyQuery, emptyUpdate)
+import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), GroupingElement(..), Insert, InsertSource(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, emptyDelete, emptyInsert, emptyQuery, emptyUpdate)
 import Sqld.Expr (col, int, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -642,3 +642,21 @@ updateWhere e u = u { where_ = Just $ case u.where_ of
 
 updateReturning :: Array SelectExpr -> Update -> Update
 updateReturning exprs u = u { returning = exprs }
+
+-- ---------------------------------------------------------------------------
+-- DELETE
+-- ---------------------------------------------------------------------------
+
+deleteFrom :: String -> Delete
+deleteFrom = emptyDelete
+
+using :: Array String -> Delete -> Delete
+using tables d = d { using = tables }
+
+deleteWhere :: Expr -> Delete -> Delete
+deleteWhere e d = d { where_ = Just $ case d.where_ of
+  Nothing   -> e
+  Just prev -> And [prev, e] }
+
+deleteReturning :: Array SelectExpr -> Delete -> Delete
+deleteReturning exprs d = d { returning = exprs }
