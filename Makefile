@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help build test validate validate-fast sql list examples examples-check pg-stop clean
+.PHONY: help build test validate validate-fast sql list examples examples-check coverage pg-stop clean
 
 # Optional filter: `make validate-fast ONLY=join`
 ONLY ?=
@@ -15,12 +15,14 @@ help: ## Show this help
 		| awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 	@echo
 	@echo "Variables:"
-	@echo "  ONLY=<pattern>  filter corpus entries by name (validate, validate-fast)"
-	@echo "  SQL=<query>     ad-hoc query for the 'sql' target"
+	@echo "  ONLY=<pattern>     filter corpus entries by name (validate, validate-fast)"
+	@echo "  SQL=<query>        ad-hoc query for the 'sql' target"
+	@echo "  PG_SOURCE=<dir>    PostgreSQL source tree for the 'coverage' target"
 	@echo
 	@echo "Examples:"
 	@echo "  make validate-fast ONLY=join"
 	@echo "  make sql SQL='SELECT \"u\".* FROM \"users\" AS \"u\"'"
+	@echo "  make coverage PG_SOURCE=~/src/postgres"
 
 build: ## Compile the library
 	spago build
@@ -49,6 +51,13 @@ examples-check: ## Fail if EXAMPLES.md is out of date
 
 list: ## List corpus entry names (no database needed)
 	@$(VALIDATOR) --list
+
+coverage: ## Measure grammar coverage against libpg_query (needs PG_SOURCE)
+ifndef PG_SOURCE
+	$(error PG_SOURCE is not set. Usage: make coverage PG_SOURCE=/path/to/postgres)
+endif
+	spago test
+	@node scripts/coverage-report.mjs --pg-source $(PG_SOURCE)
 
 pg-stop: ## Remove the local PostgreSQL container
 	docker rm -f sqld-pg-validate 2>/dev/null || true

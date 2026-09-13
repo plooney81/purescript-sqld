@@ -13,6 +13,13 @@ A PostgreSQL SQL query builder for PureScript, inspired by [HoneySQL](https://gi
 - **Explicit select list** — no implicit `SELECT *`; use `select [star]` when you want it
 - **`raw` escape hatch** — opt out of quoting for unsupported SQL fragments
 
+How much of PostgreSQL is that? Measured against PostgreSQL's own regression
+suite, sqld emits 38 of the 83 parse-tree node types those files use in
+`SELECT`, `INSERT`, `UPDATE` and `DELETE` statements — 97.4% of node
+occurrences by frequency, since the constructs it covers are the ones real
+queries lean on hardest. [COVERAGE.md](COVERAGE.md) shows the method and ranks
+what is missing by how often it turns up.
+
 ## Installation
 
 Once published to the PureScript registry:
@@ -918,7 +925,7 @@ with `SQLD_ALLOW_ANY_DB=1` only if you are certain.
 
 The same steps run in CI on every push and pull request.
 
-### Coverage
+### Corpus coverage
 
 `test/Sqld/Corpus.purs` is the single corpus both harnesses consume. Each entry
 is tagged with the AST constructors it exercises, and `Test.Sqld.CorpusSpec`
@@ -929,6 +936,37 @@ new tag then fails the coverage assertion until a corpus entry exists.
 
 Every table and column the corpus references must exist in
 `test/fixtures/schema.sql`.
+
+### Grammar coverage
+
+Corpus coverage answers "does every constructor we have get exercised?". It
+cannot answer "how much of PostgreSQL do we have?", because both sides of that
+question would be ours to write down.
+
+`make coverage` borrows a denominator nobody here maintains. It parses
+PostgreSQL's own regression suite with `libpg_query` — PostgreSQL's own parser,
+packaged as a library — histograms the parse-tree node types by frequency, and
+subtracts the node types that appear in the parse trees of the SQL sqld itself
+emits. Both sides are derived: change the AST and add the corpus entry the
+corpus spec demands, and the number moves without anyone editing a list.
+
+[COVERAGE.md](COVERAGE.md) is the current report. It carries the two figures —
+distinct node types, and node occurrences weighted by frequency — the size of
+the corpus they were measured against, and a ranked list of the unsupported
+constructs, most frequent first.
+
+It needs a native dependency and a PostgreSQL source tree, so it runs on demand
+rather than in CI:
+
+```
+npm install libpg-query
+curl -sLO https://github.com/postgres/postgres/archive/refs/tags/REL_17_2.tar.gz
+tar xzf REL_17_2.tar.gz
+make coverage PG_SOURCE=postgres-REL_17_2
+```
+
+`node scripts/coverage-report.mjs --help` lists the flags; `--top 0` prints the
+full tail rather than the fifty most frequent.
 
 ## Contributing
 

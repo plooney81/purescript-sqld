@@ -73,6 +73,20 @@ make examples        # regenerate
 make examples-check  # fail if stale (this is what CI runs)
 ```
 
+`COVERAGE.md` is generated from PostgreSQL's regression suite by
+`make coverage` — also do not edit it by hand. It is the answer to "how much of
+PostgreSQL do we support?", and unlike a checklist neither side of it is
+maintained here: adding a constructor and the corpus entry the coverage rule
+already demands moves the number by itself. It needs `npm install libpg-query`
+and a PostgreSQL source tree, so it runs on demand rather than in CI:
+
+```
+make coverage PG_SOURCE=/path/to/postgres
+```
+
+Regenerate it when a change lands that the number should reflect. The
+prerequisites are documented at the top of `scripts/coverage-report.mjs`.
+
 Add a `CHANGELOG.md` entry under `## [Unreleased]` for anything user-visible.
 
 ## Style
