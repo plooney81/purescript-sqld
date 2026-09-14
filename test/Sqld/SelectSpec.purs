@@ -1,10 +1,10 @@
 module Test.Sqld.SelectSpec where
 
-import Prelude hiding (not, between)
+import Prelude (Unit, discard, (#), ($), (*), (<>), (>>>))
 import Sqld.Core (JoinCondition(..), JoinType(..), Literal(..), Query, emptyQuery)
-import Sqld.Expr
+import Sqld.Expr (avg, binOp, bool, coalesce, col, countStar, int, raw, str, tcol, upper, (.<), (.==), (.>))
 import Sqld.Format (format, formatInline)
-import Sqld.Select
+import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, innerJoinAs, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, limitExpr, lockOf, mergeQueries, naturalJoin, noWait, offset, offsetExpr, orderBy, orderUsing, relAs, rightJoin, select, select', skipLocked, star, starFrom, tcolAs, union, unionAll, where_, withCte, withRecursive, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 

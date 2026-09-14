@@ -40,6 +40,33 @@ make sql SQL='SELECT "u".* FROM "users" AS "u"'
 `make sql` is the fastest way to answer "will PostgreSQL accept this?" during a
 formatter change. `make pg-stop` removes the container when you are done.
 
+The suite takes the `spec-node` runner's options after `--`, which is the
+quickest loop while one test is red:
+
+```
+spago test -- --example "window"    # only tests whose full name contains it
+spago test -- --only-failures       # only what failed on the last run
+spago test -- -n                    # the above, stopping at the first failure
+```
+
+The last run is recorded in `.spec-results`, which is ignored by git.
+
+## Warnings are errors
+
+`spago.yaml` sets `strict: true` on both `package.build` and `package.test`, so
+any compiler warning in `src/` or `test/` fails the build — an unused import, a
+shadowed name, a binding introduced and never used.
+
+The formatters already break loudly on their own: they carry no catch-all case,
+so a constructor added to `Sqld.Core` leaves them non-exhaustive, and because
+they are monomorphic that is a type error rather than a warning. This flag
+extends the same idea to everything the compiler would otherwise only mention
+in passing, which is the class that accumulates across refactors.
+
+Fix the warning rather than working around it. If one genuinely has to be
+tolerated, `censorProjectWarnings` in `spago.yaml` is the escape hatch — record
+why in a comment beside it. Nothing is censored today.
+
 ## The rule that shapes most changes
 
 Golden tests prove `format` emits the string we expected. The validation
@@ -145,7 +172,7 @@ summary:
 
 Before opening a pull request:
 
-- [ ] `make validate` passes locally
+- [ ] `make validate` passes locally (a compiler warning fails it)
 - [ ] `make examples-check` passes (or you regenerated `EXAMPLES.md`)
 - [ ] new AST constructors have corpus entries
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`

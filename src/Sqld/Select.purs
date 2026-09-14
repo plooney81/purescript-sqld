@@ -71,7 +71,7 @@ fromLateral sub alias = fromRel $ lateral sub alias
 -- ---------------------------------------------------------------------------
 
 select :: Array SelectExpr -> Query -> Query
-select exprs q = q { select = q.select <> exprs }
+select items q = q { select = q.select <> items }
 
 -- | Starts a query from its select list, so the common case need not name
 -- | `emptyQuery`:
@@ -82,7 +82,7 @@ select exprs q = q { select = q.select <> exprs }
 -- | reusable `Query -> Query` fragments with `select` and apply them to
 -- | `emptyQuery` at the end.
 select' :: Array SelectExpr -> Query
-select' exprs = select exprs emptyQuery
+select' items = select items emptyQuery
 
 -- | `SELECT DISTINCT` — duplicate rows collapse to one.
 -- |
@@ -108,7 +108,7 @@ distinct q = q { distinct = Just Distinct }
 -- | expressions are driven by user input.
 distinctOn :: Array Expr -> Query -> Query
 distinctOn [] q = distinct q
-distinctOn exprs q = q { distinct = Just $ DistinctOn exprs }
+distinctOn keys q = q { distinct = Just $ DistinctOn keys }
 
 where_ :: Expr -> Query -> Query
 where_ e q = q { where_ = Just $ case q.where_ of
@@ -325,7 +325,7 @@ fullJoinAs table alias = joinOn FullJoin (relAs table alias)
 -- ---------------------------------------------------------------------------
 
 orderBy :: Array OrderExpr -> Query -> Query
-orderBy exprs q = q { orderBy = exprs }
+orderBy terms q = q { orderBy = terms }
 
 -- | `GROUP BY expr, …` — one result row per distinct combination of the
 -- | expressions.
@@ -367,7 +367,7 @@ groupBySets sets = groupByElements [ GroupingSets sets ]
 -- | An empty list adds nothing, for the reason given on `groupBySets`.
 groupByCube :: Array Expr -> Query -> Query
 groupByCube [] = identity
-groupByCube exprs = groupByElements [ Cube exprs ]
+groupByCube keys = groupByElements [ Cube keys ]
 
 -- | `GROUP BY ROLLUP (a, b)` — every prefix of the expressions:
 -- | `(a, b), (a), ()`. The subtotals down one hierarchy, ordered from the most
@@ -378,7 +378,7 @@ groupByCube exprs = groupByElements [ Cube exprs ]
 -- | An empty list adds nothing, for the reason given on `groupBySets`.
 groupByRollup :: Array Expr -> Query -> Query
 groupByRollup [] = identity
-groupByRollup exprs = groupByElements [ Rollup exprs ]
+groupByRollup keys = groupByElements [ Rollup keys ]
 
 -- | The general form: any grouping elements, appended to the clause.
 groupByElements :: Array GroupingElement -> Query -> Query
@@ -620,7 +620,7 @@ onConflictUpdate targets assignments i =
   i { onConflict = Just (DoUpdate targets assignments) }
 
 returning :: Array SelectExpr -> Insert -> Insert
-returning exprs i = i { returning = exprs }
+returning items i = i { returning = items }
 
 -- ---------------------------------------------------------------------------
 -- UPDATE
@@ -641,7 +641,7 @@ updateWhere e u = u { where_ = Just $ case u.where_ of
   Just prev -> And [prev, e] }
 
 updateReturning :: Array SelectExpr -> Update -> Update
-updateReturning exprs u = u { returning = exprs }
+updateReturning items u = u { returning = items }
 
 -- ---------------------------------------------------------------------------
 -- DELETE
@@ -659,4 +659,4 @@ deleteWhere e d = d { where_ = Just $ case d.where_ of
   Just prev -> And [prev, e] }
 
 deleteReturning :: Array SelectExpr -> Delete -> Delete
-deleteReturning exprs d = d { returning = exprs }
+deleteReturning items d = d { returning = items }

@@ -69,7 +69,7 @@ pg-stop: ## Remove the local PostgreSQL container
 	docker rm -f sqld-pg-validate 2>/dev/null || true
 
 clean: ## Remove build and test artifacts
-	rm -rf output test-artifacts
+	rm -rf output test-artifacts .spec-results
 
 # Wraps a value in single quotes, escaping any it already contains, so queries
 # survive the trip through the shell intact.

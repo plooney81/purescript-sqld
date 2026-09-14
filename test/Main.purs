@@ -2,9 +2,8 @@ module Test.Main where
 
 import Prelude
 import Effect (Effect)
-import Effect.Aff (launchAff_)
 import Test.Spec.Reporter (consoleReporter)
-import Test.Spec.Runner (runSpec)
+import Test.Spec.Runner.Node (runSpecAndExitProcess)
 import Test.Sqld.CorpusEmit (emitCorpusJson, emitExamplesJson)
 import Test.Sqld.CorpusSpec (corpusSpec)
 import Test.Sqld.DeleteSpec (deleteSpec)
@@ -23,7 +22,7 @@ main = do
   emitCorpusJson
   emitExamplesJson
   emitGeneratedJson
-  launchAff_ $ runSpec [consoleReporter] do
+  runSpecAndExitProcess [consoleReporter] do
     exprSpec
     selectSpec
     formatSpec
