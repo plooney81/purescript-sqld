@@ -54,7 +54,10 @@ jobs:
           }
 
       # Golden tests prove we emit the string we expected. This proves
-      # PostgreSQL accepts it.
+      # PostgreSQL accepts it — for the hand-written corpus, and for the queries
+      # `Test.Sqld.Generate` produced from a fresh seed on the step above. A
+      # generated failure prints the seed it came from, which is all a
+      # reproduction takes.
       - name: Validate emitted SQL against PostgreSQL
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/sqld_validate

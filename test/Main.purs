@@ -10,6 +10,8 @@ import Test.Sqld.CorpusSpec (corpusSpec)
 import Test.Sqld.DeleteSpec (deleteSpec)
 import Test.Sqld.ExprSpec (exprSpec)
 import Test.Sqld.FormatSpec (formatSpec)
+import Test.Sqld.GenerateEmit (emitGeneratedJson)
+import Test.Sqld.GenerateSpec (generateSpec)
 import Test.Sqld.InsertSpec (insertSpec)
 import Test.Sqld.SelectSpec (selectSpec)
 import Test.Sqld.UpdateSpec (updateSpec)
@@ -20,6 +22,7 @@ main = do
   -- replay even when a golden test fails.
   emitCorpusJson
   emitExamplesJson
+  emitGeneratedJson
   launchAff_ $ runSpec [consoleReporter] do
     exprSpec
     selectSpec
@@ -28,3 +31,4 @@ main = do
     updateSpec
     deleteSpec
     corpusSpec
+    generateSpec

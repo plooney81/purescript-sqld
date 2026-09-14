@@ -96,11 +96,25 @@ inlineWith layout q = foldl substitute sql subs
       acc
 
 inlineLiteral :: Literal -> String
-inlineLiteral (LitInt n)     = show n
-inlineLiteral (LitNumber n)  = show n
+inlineLiteral (LitInt n)     = bracketNegative (show n)
+inlineLiteral (LitNumber n)  = bracketNegative (show n)
 inlineLiteral (LitString s)  = "'" <> String.replaceAll (String.Pattern "'") (String.Replacement "''") s <> "'"
 inlineLiteral (LitBoolean b) = if b then "TRUE" else "FALSE"
 inlineLiteral LitNull        = "NULL"
+
+-- | Brackets a negative number.
+-- |
+-- | A placeholder is an atom, so the printer never brackets it; the value it
+-- | stands for is not. `::` binds tighter than a leading minus, so substituting
+-- | `-1` into `$1::text` gives `-1::text`, which PostgreSQL reads as
+-- | `-(1::text)` — a different expression, and one it cannot type. Every
+-- | postfix operator has the same reach, so the brackets go on the literal
+-- | rather than on the one operator that exposed it.
+-- |
+-- | Only the inline forms need this. `format` binds the literal, and `$1` is an
+-- | atom whatever it is bound to.
+bracketNegative :: String -> String
+bracketNegative s = if String.take 1 s == "-" then "(" <> s <> ")" else s
 
 -- ---------------------------------------------------------------------------
 -- Query-level formatter
@@ -383,13 +397,13 @@ precOf (Quantified _ op _ _)  = opPrec op
 precOf (Unary op _)    = unaryPrec op
 precOf (Postfix _ _)   = 4
 precOf (Cast _ _)      = 12
-precOf (Between _ _ _) = 6
+precOf (Between _ _ _) = matchingPrec
 precOf _               = atomPrec
 
 opPrec :: String -> Int
 opPrec op
-  | Array.elem op [ "=", "<>", "<", ">", "<=", ">=" ] = 5
-  | Array.elem op [ "IN", "NOT IN", "LIKE", "ILIKE", "NOT LIKE", "NOT ILIKE", "SIMILAR TO" ] = 6
+  | Array.elem op [ "=", "<>", "<", ">", "<=", ">=" ] = comparisonPrec
+  | Array.elem op [ "IN", "NOT IN", "LIKE", "ILIKE", "NOT LIKE", "NOT ILIKE", "SIMILAR TO" ] = matchingPrec
   | Array.elem op [ "+", "-" ] = 8
   | Array.elem op [ "*", "/", "%" ] = 9
   | op == "^" = 10
@@ -397,6 +411,27 @@ opPrec op
   -- pattern operators and arithmetic, which is where user-supplied operators
   -- such as `@>` and `->>` land.
   | otherwise = 7
+
+-- | The precedence a left operand is formatted at.
+-- |
+-- | For a left-associative operator that is its own precedence: `a - b - c`
+-- | needs no brackets on the left. PostgreSQL declares two of its levels
+-- | non-associative, though — comparison, and the range/membership/matching
+-- | group — and there an equal-precedence operand is a syntax error rather than
+-- | an expression that groups one way or the other. `1 < 2 = TRUE` and
+-- | `"age" BETWEEN 1 AND 5 IN (TRUE)` are both rejected by the parser, so the
+-- | left operand is bracketed on those levels exactly as the right one is.
+leftPrec :: Int -> Int
+leftPrec prec = if nonAssoc prec then prec + 1 else prec
+
+nonAssoc :: Int -> Boolean
+nonAssoc prec = prec == comparisonPrec || prec == matchingPrec
+
+comparisonPrec :: Int
+comparisonPrec = 5
+
+matchingPrec :: Int
+matchingPrec = 6
 
 unaryPrec :: String -> Int
 unaryPrec op
@@ -423,14 +458,15 @@ formatExpr layout (App name args) state = Tuple (name <> "(" <> intercalate ", "
 formatExpr layout (BinOp op l r) state = Tuple (lSql <> " " <> op <> " " <> rSql) s2
   where
   prec = opPrec op
-  Tuple lSql s1 = formatChild layout prec l state
-  -- Left-associative: an equal-precedence right operand needs bracketing.
+  Tuple lSql s1 = formatChild layout (leftPrec prec) l state
+  -- An equal-precedence right operand always needs bracketing; whether the left
+  -- one does depends on the level, which is what `leftPrec` answers.
   Tuple rSql s2 = formatChild layout (prec + 1) r s1
 formatExpr layout (Quantified qop op l r) state =
   Tuple (lSql <> " " <> op <> " " <> keyword qop <> " " <> rSql) s2
   where
   prec = opPrec op
-  Tuple lSql s1 = formatChild layout prec l state
+  Tuple lSql s1 = formatChild layout (leftPrec prec) l state
   Tuple rSql s2 = formatQuantArg layout r s1
 formatExpr layout (Unary op e) state = Tuple (op <> " " <> sql) s'
   where
@@ -458,9 +494,11 @@ formatExpr layout (Or exprs)    state = Tuple ("(" <> intercalate " OR " parts <
 formatExpr layout (Between e lo hi) state =
   Tuple (eSql <> " BETWEEN " <> loSql <> " AND " <> hiSql) s3
   where
-  Tuple eSql  s1 = formatChild layout 7 e  state
-  Tuple loSql s2 = formatChild layout 7 lo s1
-  Tuple hiSql s3 = formatChild layout 7 hi s2
+  -- One level tighter than BETWEEN's own, so an operand from its level — a
+  -- comparison, an `IN`, another `BETWEEN` — is bracketed.
+  Tuple eSql  s1 = formatChild layout (matchingPrec + 1) e  state
+  Tuple loSql s2 = formatChild layout (matchingPrec + 1) lo s1
+  Tuple hiSql s3 = formatChild layout (matchingPrec + 1) hi s2
 formatExpr layout (Over e w) state = Tuple (fnSql <> " OVER " <> windowSql) s2
   where
   -- `OVER` binds tighter than any operator, so its function is formatted at
