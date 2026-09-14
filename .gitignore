@@ -5,3 +5,4 @@ node_modules/
 .psc-ide-port
 .purs-repl
 test-artifacts/
+.spec-results

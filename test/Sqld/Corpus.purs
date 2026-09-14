@@ -1558,7 +1558,7 @@ exprTags e = case e of
   -- each individual operator reaches PostgreSQL now that they share a
   -- constructor.
   BinOp op l r -> nodes [ "Expr.BinOp", "Expr.BinOp." <> op ] [ l, r ]
-  Quantified qop op l r -> nodes [ "Expr.Quantified", "Expr.Quantified." <> quantOpTag qop ] [ l, r ]
+  Quantified qop _ l r -> nodes [ "Expr.Quantified", "Expr.Quantified." <> quantOpTag qop ] [ l, r ]
   Unary op x -> nodes [ "Expr.Unary", "Expr.Unary." <> op ] [ x ]
   Postfix op x -> nodes [ "Expr.Postfix", "Expr.Postfix." <> op ] [ x ]
   Cast x _ -> node "Expr.Cast" [ x ]

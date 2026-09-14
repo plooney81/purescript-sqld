@@ -3,9 +3,9 @@ module Test.Sqld.InsertSpec where
 import Prelude (Unit, discard, (#))
 import Data.Tuple (Tuple(..))
 import Sqld.Core (Literal(..))
-import Sqld.Expr (bool, col, default_, excluded, int, str, (.==))
+import Sqld.Expr (bool, col, default_, excluded, str, (.==))
 import Sqld.Format (formatInsert, formatInsertInline)
-import Sqld.Select (as, cols, expr, from, insertFrom, insertInto, onConflictDoNothing, onConflictUpdate, returning, select', star, values, where_)
+import Sqld.Select (as, cols, from, insertFrom, insertInto, onConflictDoNothing, onConflictUpdate, returning, select', star, values, where_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
 

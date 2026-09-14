@@ -1,5 +1,11 @@
 package:
   name: sqld
+  build:
+    # Warnings are errors. A missing formatter case is already a hard type
+    # error, so what this catches is the quieter class — unused imports,
+    # shadowed names, bindings introduced and never used — which a warning
+    # only stops if somebody reads the build output.
+    strict: true
   publish:
     version: "0.1.0"
     license: "MIT"
@@ -19,6 +25,9 @@ package:
     main: Example.Main
   test:
     main: Test.Main
+    # Test sources are held to the same standard as the library: see the note
+    # on `build.strict` above.
+    strict: true
     dependencies:
       - aff
       - console
@@ -30,6 +39,7 @@ package:
       - node-process
       - quickcheck
       - spec
+      - spec-node
 
 workspace:
   packageSet:
