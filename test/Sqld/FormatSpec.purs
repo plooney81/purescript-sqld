@@ -1,9 +1,9 @@
 module Test.Sqld.FormatSpec where
 
-import Prelude (Unit, discard, (#), (<>))
+import Prelude (Unit, discard, negate, (#), (<>))
 import Data.String (trim)
 import Sqld.Core (JoinCondition(..), JoinType(..), Literal(..))
-import Sqld.Expr (and, bool, col, countStar, currentRow, exists, inSub, int, null, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, tcol, unboundedPreceding, withFrame, (.==))
+import Sqld.Expr (and, between, binOp, bool, cast, col, countStar, currentRow, exists, in_, inSub, int, null, num, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, tcol, unboundedPreceding, withFrame, (.<), (.==))
 import Sqld.Format (format, formatInline, formatPretty)
 import Sqld.Select (as, asc, cols, derived, desc, except, expr, forUpdate, from, fromAs, fromSub, joinOn, joinRel, lateral, leftJoin, limit, orderBy, select', skipLocked, star, starFrom, union, unionAll, where_, with_)
 import Test.Spec (Spec, describe, it)
@@ -40,6 +40,44 @@ formatSpec = describe "Sqld.Format" do
             # where_ (col "x" .== null)
             # formatInline
       query `shouldEqual` "SELECT * FROM \"t\" WHERE \"x\" = NULL"
+
+    -- `::` binds tighter than a leading minus, so an unbracketed `-1::text`
+    -- would parse as `-(1::text)`. The parameterised form is immune — `$1` is
+    -- an atom — which is why only the inline forms bracket.
+    it "negative numbers are bracketed" do
+      let query = select' [ expr (cast (int (-1)) "text"), expr (cast (num (-1.5)) "text") ]
+            # formatInline
+      query `shouldEqual` "SELECT (-1)::text, (-1.5)::text"
+
+    it "a bound negative number is not" do
+      let result = select' [ expr (cast (int (-1)) "text") ] # format
+      result.sql `shouldEqual` "SELECT $1::text"
+      result.params `shouldEqual` [ LitInt (-1) ]
+
+  describe "non-associative operators" do
+    -- PostgreSQL rejects `a BETWEEN b AND c IN (…)` and `a < b = c` outright,
+    -- so the left operand is bracketed on those two levels exactly as the right
+    -- one is. Everywhere else the printer stays left-associative.
+    it "brackets a BETWEEN under IN" do
+      let query = select' [star]
+            # from "t"
+            # where_ (in_ (between (col "age") (int 18) (int 65)) [bool true])
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE (\"age\" BETWEEN 18 AND 65) IN (TRUE)"
+
+    it "brackets a comparison under a comparison" do
+      let query = select' [star]
+            # from "t"
+            # where_ ((col "age" .< int 5) .== bool true)
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE (\"age\" < 5) = TRUE"
+
+    it "leaves a left-associative operator alone" do
+      let query = select' [star]
+            # from "t"
+            # where_ (binOp "-" (binOp "-" (col "a") (col "b")) (col "c") .== int 0)
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE \"a\" - \"b\" - \"c\" = 0"
 
   describe "substitution order" do
     it "left-to-right across the whole query" do

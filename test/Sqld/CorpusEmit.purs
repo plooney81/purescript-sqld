@@ -1,8 +1,5 @@
 -- | Writes the validation corpus to disk as JSON so `scripts/validate-sql.mjs`
 -- | can replay it against a real PostgreSQL server.
--- |
--- | JSON is hand-rolled rather than pulled in via argonaut: the shape is three
--- | fields wide and this keeps the test suite's dependency footprint small.
 module Test.Sqld.CorpusEmit
   ( corpusPath
   , corpusJson
@@ -15,15 +12,14 @@ module Test.Sqld.CorpusEmit
 import Prelude
 
 import Data.Foldable (intercalate)
-import Data.String as String
 import Effect (Effect)
 import Node.Encoding (Encoding(..))
 import Node.FS.Perms (permsAll)
 import Node.FS.Sync (mkdir', writeTextFile)
-import Sqld.Core (Literal(..))
 import Example.Cookbook (DeleteExample, Example, InsertExample, UpdateExample, cookbook, deleteCookbook, insertCookbook, updateCookbook)
 import Sqld.Format (format, formatDeleteInline, formatDeletePretty, formatDeleteStmt, formatInline, formatInsert, formatInsertInline, formatInsertPretty, formatPretty, formatUpdateStmt, formatUpdateInline, formatUpdatePretty)
 import Test.Sqld.Corpus (CorpusEntry, DeleteEntry, InsertEntry, UpdateEntry, corpus, deleteCorpus, insertCorpus, updateCorpus)
+import Test.Sqld.Json (jsonString, literalJson)
 
 corpusDir :: String
 corpusDir = "test-artifacts"
@@ -164,28 +160,3 @@ deleteEntryJson entry =
     <> " }"
   where
   formatted = formatDeleteStmt entry.delete
-
-literalJson :: Literal -> String
-literalJson = case _ of
-  LitInt n -> show n
-  LitNumber n -> show n
-  LitString s -> jsonString s
-  LitBoolean b -> if b then "true" else "false"
-  LitNull -> "null"
-
--- | Escapes the characters that can appear in generated SQL. Formatted queries
--- | are single-line ASCII-plus-user-literals, so the JSON control-character
--- | escapes that matter are the ones handled here.
-jsonString :: String -> String
-jsonString s = "\"" <> escaped <> "\""
-  where
-  escaped =
-    replace "\\" "\\\\"
-      >>> replace "\"" "\\\""
-      >>> replace "\n" "\\n"
-      >>> replace "\r" "\\r"
-      >>> replace "\t" "\\t"
-      $ s
-
-  replace from to =
-    String.replaceAll (String.Pattern from) (String.Replacement to)

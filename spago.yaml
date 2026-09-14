@@ -23,8 +23,12 @@ package:
       - aff
       - console
       - effect
+      - integers
+      - lcg
       - node-buffer
       - node-fs
+      - node-process
+      - quickcheck
       - spec
 
 workspace:

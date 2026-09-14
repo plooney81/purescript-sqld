@@ -11,9 +11,16 @@
 //   * `sql`       — the parameterised form from `Sqld.Format.format`
 //   * `inlineSql` — the debug form from `Sqld.Format.formatInline`
 //
+// Alongside the corpus it replays the queries `Test.Sqld.Generate` produced,
+// which is the same property applied to queries nobody wrote down. Those run in
+// batches — one psql session per fifty statements rather than one per statement
+// — so a few hundred of them cost seconds rather than a minute, and the script
+// only falls back to running a batch statement by statement once that batch has
+// failed and it needs to say which one.
+//
 // Usage:
-//   spago test                                    # emits test-artifacts/corpus.json
-//   node scripts/validate-sql.mjs                 # validate the whole corpus
+//   spago test                                    # emits test-artifacts/*.json
+//   node scripts/validate-sql.mjs                 # corpus and generated queries
 //   node scripts/validate-sql.mjs --only join     # just the entries matching "join"
 //   node scripts/validate-sql.mjs --sql 'SELECT 1'  # probe an ad-hoc query
 //   node scripts/validate-sql.mjs --list          # list corpus entry names
@@ -21,11 +28,15 @@
 // Configuration:
 //   DATABASE_URL        connection URI (default: local throwaway database)
 //   SQLD_ALLOW_ANY_DB   set to 1 to bypass the disposable-database guard
+//   SQLD_GEN_SEED       (read by `spago test`) regenerate a given run
+//   SQLD_GEN_COUNT      (read by `spago test`) how many queries to generate
+//   SQLD_GEN_SHRINK     (read by `spago test`) emit shrink candidates too
 
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
 const CORPUS_PATH = "test-artifacts/corpus.json";
+const GENERATED_PATH = "test-artifacts/generated.json";
 const SCHEMA_PATH = "test/fixtures/schema.sql";
 const DEFAULT_URL = "postgres://postgres:postgres@localhost:5432/sqld_validate";
 
@@ -34,6 +45,10 @@ const DEFAULT_URL = "postgres://postgres:postgres@localhost:5432/sqld_validate";
 // parameterised form, not a malformed query — the inline form still gets full
 // validation — so it is reported as a warning rather than a failure.
 const INDETERMINATE_DATATYPE = "42P18";
+
+// How many PREPAREs share one psql session. Large enough that process startup
+// stops dominating, small enough that one failure only costs a re-run of fifty.
+const BATCH_SIZE = 50;
 
 const conn = process.env.DATABASE_URL ?? DEFAULT_URL;
 
@@ -46,9 +61,11 @@ function die(message) {
 
 const USAGE = `Usage: node scripts/validate-sql.mjs [options]
 
-  --only <pattern>   validate only corpus entries whose name contains <pattern>
+  --only <pattern>   validate only entries whose name contains <pattern>
   --sql <query>      validate a single ad-hoc query instead of the corpus
   --list             list corpus entry names and exit
+  --no-generated     skip the generated queries, replay only the corpus
+  --generated-only   skip the corpus, replay only the generated queries
   -h, --help         show this message
 
 Environment:
@@ -57,7 +74,7 @@ Environment:
   SQLD_ALLOW_ANY_DB  set to 1 to bypass the disposable-database guard`;
 
 function parseArgs(argv) {
-  const options = { only: null, sql: null, list: false };
+  const options = { only: null, sql: null, list: false, generated: true, corpus: true };
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -77,6 +94,12 @@ function parseArgs(argv) {
       case "--list":
         options.list = true;
         break;
+      case "--no-generated":
+        options.generated = false;
+        break;
+      case "--generated-only":
+        options.corpus = false;
+        break;
       case "-h":
       case "--help":
         console.log(USAGE);
@@ -89,6 +112,10 @@ function parseArgs(argv) {
 
   if (options.sql !== null && options.only !== null) {
     die("--sql and --only are mutually exclusive.");
+  }
+
+  if (!options.generated && !options.corpus) {
+    die("--no-generated and --generated-only are mutually exclusive.");
   }
 
   return options;
@@ -111,22 +138,37 @@ if (options.list) {
   process.exit(0);
 }
 
-let entries;
+// --- generated queries -----------------------------------------------------
+
+// Absent when the suite was run with SQLD_GEN_COUNT=0, and on a tree built
+// before the generator existed. Either way there is simply nothing to replay.
+function loadGenerated() {
+  if (!existsSync(GENERATED_PATH)) return null;
+  const set = JSON.parse(readFileSync(GENERATED_PATH, "utf8"));
+  return set.entries.length ? set : null;
+}
+
+let entries = [];
+let generated = null;
 
 if (options.sql !== null) {
   // Ad-hoc probes carry no parameter list, so the placeholder cross-check and
   // the inline form do not apply.
   entries = [{ name: "ad-hoc", sql: options.sql, inlineSql: null, params: null }];
 } else {
-  entries = loadCorpus();
+  if (options.corpus) entries = loadCorpus();
+  if (options.generated) generated = loadGenerated();
 
   if (options.only !== null) {
     const needle = options.only.toLowerCase();
-    entries = entries.filter((entry) => entry.name.toLowerCase().includes(needle));
+    const matches = (entry) => entry.name.toLowerCase().includes(needle);
 
-    if (!entries.length) {
+    entries = entries.filter(matches);
+    if (generated !== null) generated.entries = generated.entries.filter(matches);
+
+    if (!entries.length && !generated?.entries.length) {
       die(
-        `no corpus entry matches "${options.only}".\n` +
+        `no entry matches "${options.only}".\n` +
           `Run \`node scripts/validate-sql.mjs --list\` to see the available names.`,
       );
     }
@@ -224,7 +266,13 @@ function checkPrepares(sql) {
 
 assertDisposableDatabase(conn);
 
-console.log(`validate-sql: ${entries.length} ${entries.length === 1 ? "query" : "queries"}`);
+const generatedEntries = generated?.entries ?? [];
+const total = entries.length + generatedEntries.length;
+
+console.log(`validate-sql: ${total} ${total === 1 ? "query" : "queries"}`);
+if (generatedEntries.length) {
+  console.log(`validate-sql: ${generatedEntries.length} of them generated from seed ${generated.seed}`);
+}
 console.log(`validate-sql: applying ${SCHEMA_PATH}\n`);
 
 try {
@@ -270,6 +318,84 @@ for (const entry of entries) {
   }
 }
 
+// --- generated queries -----------------------------------------------------
+
+// Every statement of a batch in one psql session, each PREPARE under a name of
+// its own. ON_ERROR_STOP makes the session give up at the first failure, which
+// is why a failing batch is re-run statement by statement rather than having
+// its output parsed apart: the statements after the first error never ran.
+function runBatch(sqls) {
+  return runSql(sqls.map((sql, i) => `PREPARE sqld_batch_${i} AS ${sql};`).join("\n"));
+}
+
+// The shrink candidates arrive smallest-first, so the first one that still
+// fails is the smallest counterexample the shrinker could reach — the same
+// answer a shrinking loop converges on. Absent unless the suite ran with
+// SQLD_GEN_SHRINK=1.
+function smallestFailing(entry, form) {
+  for (const candidate of entry.shrinks ?? []) {
+    const sql = form === "format" ? candidate.sql : candidate.inlineSql;
+    if (checkPrepares(sql).status === "fail") return sql;
+  }
+  return null;
+}
+
+function validateGenerated(set) {
+  const troubled = new Map();
+  const record = (entry, problem) => {
+    if (!troubled.has(entry.name)) troubled.set(entry.name, { entry, problems: [] });
+    troubled.get(entry.name).problems.push(problem);
+  };
+
+  const items = [];
+
+  for (const entry of set.entries) {
+    const mismatch = checkPlaceholders(entry);
+    if (mismatch) record(entry, { form: "params", status: "fail", detail: mismatch });
+    items.push({ entry, form: "format", sql: entry.sql });
+    items.push({ entry, form: "formatInline", sql: entry.inlineSql });
+  }
+
+  for (let i = 0; i < items.length; i += BATCH_SIZE) {
+    const batch = items.slice(i, i + BATCH_SIZE);
+    // If the whole batch prepares there is nothing more to learn from it, and
+    // that is the overwhelmingly common case.
+    if (runBatch(batch.map((item) => item.sql)) === null) continue;
+
+    for (const item of batch) {
+      const result = checkPrepares(item.sql);
+      if (result.status === "pass") continue;
+      record(item.entry, {
+        form: item.form,
+        ...result,
+        sql: item.sql,
+        shrunk: result.status === "fail" ? smallestFailing(item.entry, item.form) : null,
+      });
+    }
+  }
+
+  for (const { entry, problems } of troubled.values()) {
+    const failed = problems.filter((p) => p.status === "fail");
+
+    if (failed.length) {
+      failures.push({ entry, problems: failed });
+      console.log(`  FAIL  ${entry.name}`);
+    } else {
+      warnings.push({ entry, problems });
+      console.log(`  WARN  ${entry.name}`);
+    }
+  }
+
+  const clean = set.entries.length - troubled.size;
+  console.log(`  ok    ${clean} generated ${clean === 1 ? "query" : "queries"}`);
+
+  return [...troubled.values()].some(({ problems }) => problems.some((p) => p.status === "fail"));
+}
+
+const generatedFailed = generatedEntries.length ? validateGenerated(generated) : false;
+
+// --- reporting -------------------------------------------------------------
+
 function report(label, items) {
   if (!items.length) return;
   console.log(`\n${label}\n${"=".repeat(label.length)}`);
@@ -283,6 +409,10 @@ function report(label, items) {
           .map((line) => `  ${line}`)
           .join("\n"),
       );
+      if (problem.shrunk) {
+        console.log(`  smallest failing shrink:`);
+        console.log(`    ${problem.shrunk}`);
+      }
     }
   }
 }
@@ -290,8 +420,24 @@ function report(label, items) {
 report("Warnings", warnings);
 report("Failures", failures);
 
+// A generated failure is only actionable if it can be seen again, and the seed
+// is the whole of what that takes: generation is pure.
+if (generatedFailed) {
+  const label = "Reproducing";
+  console.log(`\n${label}\n${"=".repeat(label.length)}\n`);
+  console.log(`  The generated queries above came from seed ${generated.seed}:\n`);
+  console.log(`    SQLD_GEN_SEED=${generated.seed} make validate\n`);
+
+  if (!generated.shrinks) {
+    console.log(`  Add SQLD_GEN_SHRINK=1 to cut the counterexample down to something readable:\n`);
+    console.log(`    SQLD_GEN_SEED=${generated.seed} SQLD_GEN_SHRINK=1 make validate\n`);
+  }
+
+  console.log(`  A bug found this way belongs in test/Sqld/Corpus.purs as a regression entry.`);
+}
+
 console.log(
-  `\nvalidate-sql: ${entries.length - failures.length - warnings.length} passed, ` +
+  `\nvalidate-sql: ${total - failures.length - warnings.length} passed, ` +
     `${warnings.length} warned, ${failures.length} failed`,
 );
 

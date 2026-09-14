@@ -63,6 +63,37 @@ So when you add a constructor to `Sqld.Core`:
 This is deliberate friction. It is why the README can claim every documented
 query has been run against a real server.
 
+## When the generated queries fail
+
+`make validate` also replays two hundred randomly generated queries
+(`test/Sqld/Generate.purs`), from a fresh seed each run. A failure there looks
+different from a corpus failure: it is a query nobody wrote, and it may not
+recur on the next run.
+
+The seed is the whole of what a reproduction takes, and the validator prints it:
+
+```
+SQLD_GEN_SEED=12345 make validate                       # the same run again
+SQLD_GEN_SEED=12345 SQLD_GEN_SHRINK=1 make validate     # cut down to size
+```
+
+With `SQLD_GEN_SHRINK=1` the suite emits shrink candidates alongside each query
+and the validator reports the smallest one that still fails — a line or two
+rather than a screenful. Every shrink is type-preserving by construction, so the
+smaller query fails for the same reason the larger one did.
+
+Then decide which side is wrong:
+
+- **sqld is wrong.** Fix it, and add the shrunk query to `test/Sqld/Corpus.purs`
+  as a regression entry — the generator will not reliably find it again, and the
+  corpus runs every time. `cast-negative-literal` and the two `nonassoc-`
+  entries all arrived this way.
+- **The generator is wrong**, because it built SQL PostgreSQL was never going to
+  accept — a `FOR UPDATE` on an outer join, an ungrouped column. Tighten the
+  generator so it cannot produce that shape, and say why in a comment: those
+  comments are the accumulated record of PostgreSQL's rules about which clauses
+  may sit together.
+
 ## Documentation that is generated
 
 `EXAMPLES.md` is generated from `src/Example/Cookbook.purs` — do not edit it by

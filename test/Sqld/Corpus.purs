@@ -276,6 +276,27 @@ handWritten =
         # where_ (between (col "age") (int 18) (int 65))
     }
 
+  -- Non-associativity ---------------------------------------------------------
+  --
+  -- Both found by `Test.Sqld.Generate`. PostgreSQL declares its comparison and
+  -- range/membership levels non-associative, so an operand of the same level
+  -- has to be bracketed on the left as well as on the right: `"age" BETWEEN 18
+  -- AND 65 IN (TRUE)` and `"age" < 5 = TRUE` are syntax errors rather than
+  -- expressions that group one way or the other. Nothing in the corpus nested a
+  -- comparison inside a comparison until the generator did.
+
+  , { name: "nonassoc-between-under-in"
+    , query: select' [ star ]
+        # from "users"
+        # where_ (in_ (between (col "age") (int 18) (int 65)) [ bool true ])
+    }
+
+  , { name: "nonassoc-comparison-under-comparison"
+    , query: select' [ star ]
+        # from "users"
+        # where_ ((col "age" .< int 5) .== bool true)
+    }
+
   -- Raw escape hatch ---------------------------------------------------------
 
   , { name: "where-raw"
@@ -709,6 +730,19 @@ handWritten =
     , query: select' [ star ]
         # from "users"
         # where_ (cast (binOp "+" (col "age") (int 1)) "numeric" .>= num 1.5)
+    }
+
+  -- Found by `Test.Sqld.Generate`, which reached it before anyone thought to
+  -- write it down. `::` binds tighter than a leading minus, so the inline forms
+  -- have to bracket a negative literal: `-1::text` is `-(1::text)`, which
+  -- PostgreSQL cannot type. The parameterised form was always fine — `$1` is an
+  -- atom — so only `formatInline` ever emitted the broken SQL, and only this
+  -- entry's second form catches it.
+  , { name: "cast-negative-literal"
+    , query: select'
+        [ as (cast (int (-1)) "text") "i"
+        , as (cast (num (-1.5)) "text") "n"
+        ]
     }
 
   -- Subqueries (Sub) ---------------------------------------------------------

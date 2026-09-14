@@ -19,18 +19,24 @@ help: ## Show this help
 	@echo "  SQL=<query>        ad-hoc query for the 'sql' target"
 	@echo "  PG_SOURCE=<dir>    PostgreSQL source tree for the 'coverage' target"
 	@echo
+	@echo "Environment (property-based generation, read by 'spago test'):"
+	@echo "  SQLD_GEN_SEED=<n>  replay one generated run exactly (default: random)"
+	@echo "  SQLD_GEN_COUNT=<n> how many queries to generate (default: 200, 0 disables)"
+	@echo "  SQLD_GEN_SHRINK=1  emit shrink candidates, so a failure is reported small"
+	@echo
 	@echo "Examples:"
 	@echo "  make validate-fast ONLY=join"
 	@echo "  make sql SQL='SELECT \"u\".* FROM \"users\" AS \"u\"'"
 	@echo "  make coverage PG_SOURCE=~/src/postgres"
+	@echo "  SQLD_GEN_SEED=12345 SQLD_GEN_SHRINK=1 make validate"
 
 build: ## Compile the library
 	spago build
 
-test: ## Run the golden tests (also emits test-artifacts/corpus.json)
+test: ## Run the golden tests (also emits test-artifacts/corpus.json and generated.json)
 	spago test
 
-validate: ## Run tests, then validate every query against real PostgreSQL
+validate: ## Run tests, then validate every query — corpus and generated — against real PostgreSQL
 	$(LOCAL_PG) $(ARGS)
 
 validate-fast: ## Validate using the existing corpus and a warm container (skips spago test)

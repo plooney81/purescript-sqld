@@ -937,6 +937,47 @@ new tag then fails the coverage assertion until a corpus entry exists.
 Every table and column the corpus references must exist in
 `test/fixtures/schema.sql`.
 
+### Property-based generation
+
+The corpus proves the queries we thought of are valid. `Test.Sqld.Generate`
+tries the ones we did not: it builds random `Query` values, and the validator
+replays them alongside the corpus. That is what turns "PostgreSQL accepts our
+examples" into something closer to a claim, particularly for the precedence
+printer, whose bug surface is combinatorial and whose hand-written cases are
+exactly the ones a human already considered.
+
+Generation is schema-aware — every table and column name comes from
+`test/fixtures/schema.sql`, so a query fails parse analysis only for reasons
+that are about sqld — and typed, so a comparison never straddles two
+incomparable types. Query shapes are generated whole rather than clause by
+clause, because SQL's validity rules run between clauses: `DISTINCT ON`
+constrains `ORDER BY`, `GROUP BY` constrains the select list, and `FOR UPDATE`
+is rejected outright on half of them.
+
+Two hundred queries are generated on every `make test` from a fresh random seed,
+and the validator prepares them in batches, so they cost seconds rather than
+minutes. Three environment variables steer it:
+
+```
+SQLD_GEN_SEED=12345 make validate    # replay one run exactly
+SQLD_GEN_COUNT=2000 make validate    # generate more of them
+SQLD_GEN_COUNT=0 make validate       # generate none
+```
+
+Generation is pure, so the seed is the whole of what a reproduction takes — and
+the validator prints it beside any failure. Adding `SQLD_GEN_SHRINK=1` emits
+shrink candidates with each query, and the validator then reports the smallest
+one that still fails, which is usually short enough to read at a glance:
+
+```
+SQLD_GEN_SEED=12345 SQLD_GEN_SHRINK=1 make validate
+```
+
+A bug found this way belongs in `test/Sqld/Corpus.purs` as a regression entry,
+so it is checked on every run rather than only when the dice fall the same way.
+Two are already there — `cast-negative-literal` and the two `nonassoc-` entries
+— and the generator found all of them.
+
 ### Grammar coverage
 
 Corpus coverage answers "does every constructor we have get exercised?". It
