@@ -25,6 +25,11 @@ colRef t c = Col { table: t, column: c }
 -- |
 -- | Splitting happens at the first dot. An identifier that genuinely contains
 -- | one must go through `tcol` or `colRef`, which never split.
+-- |
+-- | The name itself may hold untrusted data: `Sqld.Format.quoteIdent` quotes
+-- | it, doubling any `"` it contains, so it cannot escape into SQL. What it
+-- | cannot do is stop a dot from being read as a qualifier, which is the
+-- | reason for the paragraph above.
 col :: String -> Expr
 col name = case String.indexOf (String.Pattern ".") name of
   Nothing -> colRef Nothing name
@@ -57,6 +62,11 @@ null = Lit LitNull
 
 -- | Escape hatch for SQL this module cannot express. Emitted verbatim, so the
 -- | caller owns both its correctness and its parenthesisation.
+-- |
+-- | **Trusted input only.** `raw` is an injection sink: whatever it is given
+-- | becomes SQL. Nothing else the library does compensates for a string that
+-- | reached it from a request, a form field or a database row — use `str` and
+-- | let the value be bound. See the security section of the README.
 raw :: String -> Expr
 raw = Raw
 
@@ -76,24 +86,39 @@ excluded column = Col ({ table: Just "excluded", column } :: ColumnRef)
 -- ---------------------------------------------------------------------------
 
 -- | Any function: `app "COUNT" [col "id"]` renders `COUNT("id")`.
+-- |
+-- | **Trusted input only.** The name is emitted verbatim, not quoted: it is
+-- | `raw` with a narrower shape. See the security section of the README.
 app :: String -> Array Expr -> Expr
 app = App
 
 -- | Any infix operator: `binOp "@>" a b` renders `a @> b`. Precedence is
 -- | resolved by `Sqld.Format`; unknown operators are treated as PostgreSQL
 -- | treats them, at the generic "other operator" level.
+-- |
+-- | **Trusted input only.** The operator is emitted verbatim, so a
+-- | user-driven comparison threaded through here is `raw` by another name.
+-- | See the security section of the README.
 binOp :: String -> Expr -> Expr -> Expr
 binOp = BinOp
 
 -- | Any prefix operator: `unary "-" e` renders `- e`.
+-- |
+-- | **Trusted input only**, as `binOp` is.
 unary :: String -> Expr -> Expr
 unary = Unary
 
 -- | Any postfix operator: `postfix "IS TRUE" e` renders `e IS TRUE`.
+-- |
+-- | **Trusted input only**, as `binOp` is.
 postfix :: String -> Expr -> Expr
 postfix = Postfix
 
 -- | `cast (col "id") "text"` renders `"id"::text`.
+-- |
+-- | **Trusted input only.** The type name is emitted verbatim, not quoted —
+-- | it has to be, since a type name may be qualified, arrayed or
+-- | parenthesised — so it carries the same rule as `binOp`.
 cast :: Expr -> String -> Expr
 cast = Cast
 

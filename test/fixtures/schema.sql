@@ -52,3 +52,20 @@ CREATE TABLE articles
   , title        text NOT NULL
   , published_at timestamptz
   );
+
+-- Identifiers chosen to break out of their own quoting: each one ends the
+-- quoted region and starts fresh SQL if `Sqld.Format.quoteIdent` ever stops
+-- doubling an embedded `"`. The corpus selects from this table, so the harness
+-- makes PostgreSQL read the names back — as columns, which resolve, rather
+-- than as the SQL they are spelled to look like.
+--
+-- `Test.Sqld.Fixture` skips tables whose name is quoted. The property-based
+-- generator draws from the plain-named tables above; these names exist to be
+-- formatted, not to be generated from.
+CREATE TABLE "quo""ted"
+  ( "id" integer PRIMARY KEY
+  , "a""b" text
+  , "; DROP TABLE users; --" text
+  , "-- comment" text
+  , "a.b" text
+  );

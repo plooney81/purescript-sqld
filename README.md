@@ -12,6 +12,7 @@ A PostgreSQL SQL query builder for PureScript, inspired by [HoneySQL](https://gi
 - **Composable builders** — every helper is `Query -> Query`; chain with `#` or `>>>`
 - **Explicit select list** — no implicit `SELECT *`; use `select [star]` when you want it
 - **`raw` escape hatch** — opt out of quoting for unsupported SQL fragments
+- **A stated injection boundary** — values are parameterised, identifiers are quoted, and [Security](#security) names the handful of arguments that must not hold untrusted data
 
 How much of PostgreSQL is that? Measured against PostgreSQL's own regression
 suite, sqld emits 38 of the 83 parse-tree node types those files use in
@@ -222,7 +223,7 @@ From `Sqld.Expr`:
 | `tcol :: String -> String -> Expr` | `tcol "u" "id"` | `"u"."id"` (never splits on dots) |
 | `int / str / num / bool` | `int 42` | `$1` |
 | `null` | `null` | `$1` (NULL param) |
-| `raw :: String -> Expr` | `raw "NOW()"` | `NOW()` |
+| `raw :: String -> Expr` | `raw "NOW()"` | `NOW()` — verbatim, [trusted input only](#trusted-input-only) |
 | `.== .!= .< .<= .> .>=` | `col "age" .> int 18` | `"age" > $1` |
 | `and :: Array Expr -> Expr` | `and [e1, e2]` | `(e1 AND e2)` |
 | `or :: Array Expr -> Expr` | `or [e1, e2]` | `(e1 OR e2)` |
@@ -261,6 +262,9 @@ still reachable without falling back to `raw`:
 Common aggregates and functions are provided as one-line wrappers over `app`:
 `count`, `countStar`, `sum_`, `avg`, `min_`, `max_`, `coalesce`, `lower`,
 `upper`.
+
+The `String` each of these takes is emitted verbatim, so it must not hold
+untrusted data — see [Security](#security).
 
 ### Grouping sets
 
@@ -851,6 +855,9 @@ format :: Query -> { sql :: String, params :: Array Literal }
 formatInline :: Query -> String
 ```
 
+`format` is the only one of these that is safe to execute; see
+[Security](#security).
+
 ## Composing fragments
 
 ```purescript
@@ -873,6 +880,102 @@ Use `mergeQueries` to combine fragments built independently:
 adminFilter = emptyQuery # where_ (col "role" .== str "admin")
 result = format (mergeQueries baseUsers adminFilter)
 ```
+
+## Security
+
+`format` puts every literal in a parameter and every identifier in quotes.
+Operator, function and type names, and anything handed to `raw`, are emitted as
+written. That is the whole boundary:
+
+| Surface | Example | May it hold untrusted data? |
+|---|---|---|
+| Literals | `str userInput`, `int n`, `bool b` | **Yes** — bound as `$1`, `$2`, … and sent out of band |
+| Identifiers | `col`, `tcol`, `from`, `as`, `with_`, `joinUsing`, `lockOf`, `insertInto`, `set` | **Yes** — quoted, with any `"` doubled |
+| Operators and names | `binOp`, `unary`, `postfix`, `orderUsing`, `app`, `cast` | **No** — emitted verbatim |
+| `raw` | `raw "NOW() AT TIME ZONE 'UTC'"` | **No** — emitted verbatim |
+
+```purescript
+select' (cols ["id"])
+  # from "users"
+  # where_ (col "email" .== str userInput)
+-- SELECT "id" FROM "users" WHERE "email" = $1
+-- params: [LitString userInput]
+```
+
+The value never reaches the SQL string, so there is nothing for it to escape
+out of. Pass `sql` and `params` to the driver separately, as the quick start
+does, and that holds however the value is spelled.
+
+### Identifiers
+
+Names are quoted rather than bound, because PostgreSQL has no placeholder for
+one. `quoteIdent` doubles any `"` the name contains, which is how PostgreSQL
+escapes a quote inside a quoted identifier — so a column named
+`x" FROM "secrets" --` is emitted as `"x"" FROM ""secrets"" --"`, one
+identifier that PostgreSQL then fails to find in the catalogue. It does not
+become SQL. The corpus carries these cases against a schema that really has
+such columns, so the [validation harness](#postgresql-validation) confirms the
+server reads them back the way the golden tests say it does.
+
+Three things quoting does not do, none of which is an injection:
+
+- **A NUL byte passes through.** The wire protocol cannot carry one, so the
+  driver rejects or truncates the statement. The NUL is always inside the
+  quotes, so a truncation leaves an unterminated identifier and a syntax error
+  rather than a shorter query that runs.
+- **The empty string becomes `""`**, which PostgreSQL rejects as a zero-length
+  delimited identifier.
+- **A name longer than 63 bytes is truncated by the server** (`NAMEDATALEN - 1`),
+  so two long names can collide into one.
+
+One more asymmetry worth knowing, which is about meaning rather than safety:
+`col` splits on the first dot, so `col "u.id"` is `tcol "u" "id"`. A column
+whose name genuinely contains a dot is therefore unreachable through `col` and
+must go through `tcol` or `colRef`, neither of which splits.
+
+### Trusted input only
+
+These take a `String` that is emitted into the SQL with no quoting and no
+escaping. They read as structured builders, but each one is `raw` with a
+narrower shape:
+
+| Builder | An untrusted string becomes |
+|---|---|
+| `raw :: String -> Expr` | arbitrary SQL |
+| `binOp :: String -> Expr -> Expr -> Expr` | an infix operator |
+| `unary :: String -> Expr -> Expr` | a prefix operator |
+| `postfix :: String -> Expr -> Expr` | a postfix operator |
+| `app :: String -> Array Expr -> Expr` | a function name |
+| `cast :: Expr -> String -> Expr` | a type name |
+| `orderUsing :: String -> Expr -> OrderExpr` | an operator in `ORDER BY … USING` |
+
+A user-driven sort direction or comparison is the realistic way data arrives
+here. Map the request's vocabulary onto a fixed set in your own code rather
+than passing the string through:
+
+```purescript
+-- No: the request decides what SQL gets written
+orderUsing requestedOp (col "score")
+
+-- Yes: the request picks from a set you control
+case requestedDir of
+  "desc" -> desc (col "score")
+  _      -> asc (col "score")
+```
+
+### The debug formatters
+
+`formatInline`, `formatPretty` and their `INSERT` / `UPDATE` / `DELETE`
+counterparts write the values into the string itself. They exist for logs and
+for reading; handing one to a driver gives up the guarantee `format` provides,
+and a single quote in a value is then all that stands between the query and an
+injection. String escaping there is single-quote doubling, which is correct
+under `standard_conforming_strings` — on by default since PostgreSQL 9.1, and
+what makes a backslash in a `'…'` string an ordinary character. No `E''` string
+is ever emitted.
+
+To report something that does not match this section, see
+[SECURITY.md](SECURITY.md).
 
 ## Testing
 

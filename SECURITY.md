@@ -14,7 +14,13 @@ latest commit on `main` receives fixes.
 
 `sqld` is a pure query builder: it turns a `Query` value into a SQL string and
 an array of parameters. It never opens a connection and never executes
-anything. The security-relevant surface is therefore narrow but real:
+anything.
+
+The boundary is written down in one place: the
+[Security section of the README](README.md#security) says which arguments may
+hold untrusted data and which may not. A report is about a gap between that
+section and what the library actually does. The security-relevant surface is
+narrow but real:
 
 - **Injection through a value that should have been parameterised.** Every
   literal is meant to become a numbered param (`$1`, `$2`, …). If any input path
@@ -31,9 +37,15 @@ Not security issues:
 - `raw` emitting exactly what you passed it. `raw` is a documented escape hatch
   that opts out of quoting; passing untrusted input to it is a bug in the
   calling code.
+- An operator, function or type name emitted verbatim by `binOp`, `unary`,
+  `postfix`, `app`, `cast` or `orderUsing`. These are `raw` with a narrower
+  shape and are documented as trusted input only, for the same reason.
 - `formatInline` / `formatPretty` substituting values into the string. These are
   documented as debugging and logging helpers and must never be handed to a
   driver.
+- An identifier PostgreSQL rejects rather than runs — an empty name, or one
+  carrying a NUL byte. Both are quoted and passed to the server, which is the
+  documented behaviour; a name that *escapes* its quotes is the vulnerability.
 
 ## Reporting a vulnerability
 
