@@ -1,25 +1,42 @@
 module Sqld.Format where
 
 import Prelude
-import Data.Array (elem, filter, mapWithIndex, null, reverse) as Array
+import Data.Array (elem, filter, null) as Array
 import Data.Foldable (any, foldl, intercalate)
 import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst)
 import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Update, Window, keyword)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
 -- ---------------------------------------------------------------------------
 
+-- | How a literal reaches the SQL string.
+-- |
+-- | `Bound` is the one a driver ever sees: the literal becomes a numbered
+-- | placeholder and travels out of band, so no value can be read as SQL.
+-- | `Inlined` writes the value into the string itself, which is what the
+-- | debugging formatters print — and why their output must never be handed to
+-- | a driver. See the security section of the README.
+data ValueMode = Bound | Inlined
+
 type Bindings =
   { params  :: Array Literal
   , counter :: Int
+  , values  :: ValueMode
   }
 
 emptyBindings :: Bindings
-emptyBindings = { params: [], counter: 0 }
+emptyBindings = { params: [], counter: 0, values: Bound }
+
+-- | The starting state for the debugging formatters. Literals are still
+-- | counted, so a caller inspecting the final state sees the same bindings the
+-- | parameterised form would have produced; they are simply printed in place
+-- | rather than referred to.
+inlineBindings :: Bindings
+inlineBindings = emptyBindings { values = Inlined }
 
 type WithBindings a = Bindings -> Tuple a Bindings
 
@@ -65,36 +82,53 @@ parenthesise layout sql =
 -- Public entry points
 -- ---------------------------------------------------------------------------
 
+-- | The formatter to hand a driver: every literal becomes a numbered
+-- | placeholder and travels beside the SQL rather than inside it, so no value
+-- | can be read as SQL. Identifiers are quoted by `quoteIdent`. Operator,
+-- | function and type names, and anything given to `Sqld.Expr.raw`, are
+-- | emitted as written — see the security section of the README for the whole
+-- | boundary in one place.
 format :: Query -> FormattedQuery
 format q = { sql, params: state.params }
   where
   Tuple sql state = formatQuery Inline q emptyBindings
 
 -- | Inline all literals directly into the SQL string, single line.
--- | Intended for debugging and logging only — never pass user input through this.
+-- |
+-- | **Debugging and logging only.** The output is a string with the values
+-- | written into it: handing it to a driver gives up the one guarantee
+-- | `format` provides, so a single quote in a value is all that stands between
+-- | the query and an injection. There is no version of this that is safe to
+-- | execute — use `format`.
 formatInline :: Query -> String
 formatInline = inlineWith Inline
 
--- | Like formatInline but with each clause on its own line, and nested
--- | subqueries indented one level per level of nesting.
--- | Intended for debugging and logging only — never pass user input through this.
+-- | Like `formatInline` but with each clause on its own line, and nested
+-- | subqueries indented one level per level of nesting. **Debugging and
+-- | logging only**, for the reason `formatInline` gives.
 formatPretty :: Query -> String
 formatPretty = inlineWith (Pretty 0)
 
+-- | Formats with the literals written in place rather than bound.
+-- |
+-- | The value is printed where the placeholder would have gone, in the one pass
+-- | that builds the string. Substituting `$1` … `$n` afterwards would be the
+-- | obvious alternative and is wrong: each pass re-reads what the pass before
+-- | it wrote, so a string value — or a `raw` fragment — whose own text contains
+-- | `$1` would be rewritten again as though it were a placeholder.
 inlineWith :: Layout -> Query -> String
-inlineWith layout q = foldl substitute sql subs
-  where
-  Tuple sql state = formatQuery layout q emptyBindings
+inlineWith layout q = fst (formatQuery layout q inlineBindings)
 
-  -- Substitute from highest index first so $10 isn't clobbered by $1
-  subs = Array.reverse (Array.mapWithIndex (\i l -> Tuple (i + 1) l) state.params)
-
-  substitute acc (Tuple i l) =
-    String.replaceAll
-      (String.Pattern ("$" <> show i))
-      (String.Replacement (inlineLiteral l))
-      acc
-
+-- | A literal as SQL text, for the debugging formatters.
+-- |
+-- | A string is single-quoted with any `'` it contains doubled, which is the
+-- | whole of PostgreSQL's escaping under `standard_conforming_strings` — on by
+-- | default since 9.1, and the setting under which a backslash in a plain
+-- | `'…'` string is an ordinary character rather than an escape. No `E''`
+-- | string is ever emitted, so nothing here depends on backslash processing.
+-- | A server with `standard_conforming_strings = off` reads backslashes back,
+-- | and this output is not correct for it — one more reason the inline forms
+-- | are for reading, not for executing.
 inlineLiteral :: Literal -> String
 inlineLiteral (LitInt n)     = bracketNegative (show n)
 inlineLiteral (LitNumber n)  = bracketNegative (show n)
@@ -448,10 +482,13 @@ formatExpr _ (Col { table: Nothing, column }) state =
   Tuple (quoteIdent column) state
 formatExpr _ (Col { table: Just t, column }) state =
   Tuple (quoteIdent t <> "." <> quoteIdent column) state
-formatExpr _ (Lit literal) state =
-  Tuple ("$" <> show idx) { params: state.params <> [ literal ], counter: idx }
+formatExpr _ (Lit literal) state = Tuple rendered bound
   where
   idx = state.counter + 1
+  bound = state { params = state.params <> [ literal ], counter = idx }
+  rendered = case state.values of
+    Bound   -> "$" <> show idx
+    Inlined -> inlineLiteral literal
 formatExpr layout (App name args) state = Tuple (name <> "(" <> intercalate ", " parts <> ")") s'
   where
   Tuple parts s' = mapAccum (formatExpr layout) state args
@@ -587,6 +624,25 @@ mapAccum f s0 xs = foldl step (Tuple [] s0) xs
     where
     Tuple r st' = f x st
 
+-- | Quotes an identifier, doubling any `"` it contains.
+-- |
+-- | This is what lets a table, column, alias or CTE name carry untrusted data.
+-- | PostgreSQL ends a quoted identifier at the first undoubled `"`, so a name
+-- | such as `x" FROM "secrets" --` would close the quoting and continue as SQL
+-- | of its own; doubled, it is one identifier that happens to be spelled
+-- | `x" FROM "secrets" --`, and PostgreSQL rejects it as an unknown column
+-- | rather than running it.
+-- |
+-- | Three things it does not do, none of them an injection:
+-- |
+-- |   * A NUL byte passes through. The wire protocol cannot carry one, so the
+-- |     statement is rejected or truncated by the driver — and the NUL is
+-- |     always inside the quotes, so a truncation leaves an unterminated
+-- |     identifier and a syntax error rather than a shorter query that runs.
+-- |   * The empty string becomes `""`, which PostgreSQL rejects as a
+-- |     zero-length delimited identifier.
+-- |   * A name longer than `NAMEDATALEN - 1` (63 bytes by default) is
+-- |     truncated by the server, so two long names can collide into one.
 quoteIdent :: String -> String
 quoteIdent ident =
   "\"" <> String.replaceAll (String.Pattern "\"") (String.Replacement "\"\"") ident <> "\""
@@ -600,24 +656,17 @@ formatInsert i = { sql, params: state.params }
   where
   Tuple sql state = formatInsertSql Inline i emptyBindings
 
+-- | **Debugging and logging only**, for the reason `formatInline` gives.
 formatInsertInline :: Insert -> String
 formatInsertInline = inlineInsertWith Inline
 
+-- | **Debugging and logging only**, for the reason `formatInline` gives.
 formatInsertPretty :: Insert -> String
 formatInsertPretty = inlineInsertWith (Pretty 0)
 
+-- | As `inlineWith`, for an `Insert`.
 inlineInsertWith :: Layout -> Insert -> String
-inlineInsertWith layout i = foldl substitute sql subs
-  where
-  Tuple sql state = formatInsertSql layout i emptyBindings
-
-  subs = Array.reverse (Array.mapWithIndex (\idx l -> Tuple (idx + 1) l) state.params)
-
-  substitute acc (Tuple idx l) =
-    String.replaceAll
-      (String.Pattern ("$" <> show idx))
-      (String.Replacement (inlineLiteral l))
-      acc
+inlineInsertWith layout i = fst (formatInsertSql layout i inlineBindings)
 
 formatInsertSql :: Layout -> Insert -> WithBindings String
 formatInsertSql layout i state0 = Tuple sql s3
@@ -681,24 +730,17 @@ formatUpdateStmt u = { sql, params: state.params }
   where
   Tuple sql state = formatUpdateSql Inline u emptyBindings
 
+-- | **Debugging and logging only**, for the reason `formatInline` gives.
 formatUpdateInline :: Update -> String
 formatUpdateInline = inlineUpdateWith Inline
 
+-- | **Debugging and logging only**, for the reason `formatInline` gives.
 formatUpdatePretty :: Update -> String
 formatUpdatePretty = inlineUpdateWith (Pretty 0)
 
+-- | As `inlineWith`, for an `Update`.
 inlineUpdateWith :: Layout -> Update -> String
-inlineUpdateWith layout u = foldl substitute sql subs
-  where
-  Tuple sql state = formatUpdateSql layout u emptyBindings
-
-  subs = Array.reverse (Array.mapWithIndex (\idx l -> Tuple (idx + 1) l) state.params)
-
-  substitute acc (Tuple idx l) =
-    String.replaceAll
-      (String.Pattern ("$" <> show idx))
-      (String.Replacement (inlineLiteral l))
-      acc
+inlineUpdateWith layout u = fst (formatUpdateSql layout u inlineBindings)
 
 formatUpdateSql :: Layout -> Update -> WithBindings String
 formatUpdateSql layout u state0 = Tuple sql s4
@@ -734,24 +776,17 @@ formatDeleteStmt d = { sql, params: state.params }
   where
   Tuple sql state = formatDeleteSql Inline d emptyBindings
 
+-- | **Debugging and logging only**, for the reason `formatInline` gives.
 formatDeleteInline :: Delete -> String
 formatDeleteInline = inlineDeleteWith Inline
 
+-- | **Debugging and logging only**, for the reason `formatInline` gives.
 formatDeletePretty :: Delete -> String
 formatDeletePretty = inlineDeleteWith (Pretty 0)
 
+-- | As `inlineWith`, for a `Delete`.
 inlineDeleteWith :: Layout -> Delete -> String
-inlineDeleteWith layout d = foldl substitute sql subs
-  where
-  Tuple sql state = formatDeleteSql layout d emptyBindings
-
-  subs = Array.reverse (Array.mapWithIndex (\idx l -> Tuple (idx + 1) l) state.params)
-
-  substitute acc (Tuple idx l) =
-    String.replaceAll
-      (String.Pattern ("$" <> show idx))
-      (String.Replacement (inlineLiteral l))
-      acc
+inlineDeleteWith layout d = fst (formatDeleteSql layout d inlineBindings)
 
 formatDeleteSql :: Layout -> Delete -> WithBindings String
 formatDeleteSql layout d state0 = Tuple sql s3

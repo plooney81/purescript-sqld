@@ -4,7 +4,7 @@ import Prelude (Unit, discard, negate, (#), (<>))
 import Data.String (trim)
 import Sqld.Core (JoinCondition(..), JoinType(..), Literal(..))
 import Sqld.Expr (and, between, binOp, bool, cast, col, countStar, currentRow, exists, in_, inSub, int, null, num, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, tcol, unboundedPreceding, withFrame, (.<), (.==))
-import Sqld.Format (format, formatInline, formatPretty)
+import Sqld.Format (format, formatInline, formatPretty, quoteIdent)
 import Sqld.Select (as, asc, cols, derived, desc, except, expr, forUpdate, from, fromAs, fromSub, joinOn, joinRel, lateral, leftJoin, limit, orderBy, select', skipLocked, star, starFrom, union, unionAll, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -378,6 +378,85 @@ FOR UPDATE SKIP LOCKED
       query `shouldEqual`
         "SELECT * FROM \"users\" WHERE \"id\" IN (SELECT \"user_id\" FROM \"orders\")"
 
+  -- The names below are the ones that end their quoting and continue as SQL of
+  -- their own if `quoteIdent` ever stops doubling an embedded `"`.
+  -- `Test.Sqld.Corpus` carries the same names against a schema that really has
+  -- them, so PostgreSQL is seen to read each one back as a single identifier;
+  -- these pin the string sqld emits.
+  describe "identifier quoting" do
+    it "doubles an embedded double quote" do
+      quoteIdent "a\"b" `shouldEqual` "\"a\"\"b\""
+
+    it "keeps a breakout attempt inside one identifier" do
+      let query = select' (cols ["id"])
+            # from "x\" FROM \"secrets\" --"
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"id\" FROM \"x\"\" FROM \"\"secrets\"\" --\""
+
+    it "quotes a trailing line comment" do
+      let query = select' (cols ["id -- "]) # from "users" # formatInline
+      query `shouldEqual` "SELECT \"id -- \" FROM \"users\""
+
+    it "quotes a statement terminator" do
+      let query = select' (cols ["id"]) # from "users; DROP TABLE users" # formatInline
+      query `shouldEqual` "SELECT \"id\" FROM \"users; DROP TABLE users\""
+
+    it "quotes an alias" do
+      let query = select' [ as (col "id") "al\"ias" ] # from "users" # formatInline
+      query `shouldEqual` "SELECT \"id\" AS \"al\"\"ias\" FROM \"users\""
+
+    it "quotes a CTE name" do
+      let query = select' (cols ["id"])
+            # from "c\"te"
+            # with_ "c\"te" (select' (cols ["id"]) # from "users")
+            # formatInline
+      query `shouldEqual`
+        "WITH \"c\"\"te\" AS (SELECT \"id\" FROM \"users\") SELECT \"id\" FROM \"c\"\"te\""
+
+    -- Neither is valid PostgreSQL, so neither reaches the validation corpus.
+    -- sqld quotes them and lets the server say so, which is the documented
+    -- policy rather than an oversight: the empty name is a zero-length
+    -- delimited identifier, and the NUL stays inside the quotes, so a driver
+    -- that truncates there leaves an unterminated identifier rather than a
+    -- shorter query that runs.
+    it "quotes the empty identifier" do
+      quoteIdent "" `shouldEqual` "\"\""
+
+    it "passes a NUL byte through, inside the quotes" do
+      quoteIdent ("a" <> nul <> "b") `shouldEqual` ("\"a" <> nul <> "b\"")
+
+    it "splits `col` on the first dot only" do
+      let query = select' [ expr (col "a.b.c") ] # formatInline
+      query `shouldEqual` "SELECT \"a\".\"b.c\""
+
+    it "never splits `tcol`" do
+      let query = select' [ expr (tcol "t" "a.b") ] # formatInline
+      query `shouldEqual` "SELECT \"t\".\"a.b\""
+
+    it "binds a value that looks like SQL rather than quoting it" do
+      let query = format (select' [star] # from "users" # where_ (col "name" .== str "'; DROP TABLE users; --"))
+      query.sql `shouldEqual` "SELECT * FROM \"users\" WHERE \"name\" = $1"
+      query.params `shouldEqual` [ LitString "'; DROP TABLE users; --" ]
+
+  -- Substituting `$1` … `$n` into the finished string would re-read what the
+  -- previous substitution wrote. The inline formatters print each value where
+  -- its placeholder would have gone instead, which is what these two hold to.
+  describe "inlining is a single pass" do
+    it "leaves a value that looks like a placeholder alone" do
+      let query = select' [star]
+            # from "t"
+            # where_ (and [ col "age" .== int 7, col "name" .== str "$1" ])
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"t\" WHERE (\"age\" = 7 AND \"name\" = '$1')"
+
+    it "leaves a placeholder inside a raw fragment alone" do
+      let query = select' [ expr (raw "'$1'") ]
+            # from "t"
+            # where_ (col "age" .== int 7)
+            # formatInline
+      query `shouldEqual` "SELECT '$1' FROM \"t\" WHERE \"age\" = 7"
+
   describe "integration" do
     it "multi-column select with WHERE" do
       let query = select' (cols ["id", "name", "email"])
@@ -385,3 +464,8 @@ FOR UPDATE SKIP LOCKED
             # where_ (col "id" .== int 42)
             # formatInline
       query `shouldEqual` "SELECT \"id\", \"name\", \"email\" FROM \"users\" WHERE \"id\" = 42"
+
+-- | A NUL byte, spelled out so the escape cannot run into the character after
+-- | it: `"\x0b"` is one hex escape, not a NUL and a `b`.
+nul :: String
+nul = "\x0"
