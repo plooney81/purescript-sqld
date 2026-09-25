@@ -20,6 +20,7 @@ module Test.Sqld.Fixture
 
 import Prelude
 
+import Control.Alternative (guard)
 import Data.Array as Array
 import Data.Foldable (foldl)
 import Data.Maybe (Maybe)
@@ -119,11 +120,17 @@ type RawTable = { name :: String, columns :: Array RawColumn }
 -- | written in — one column per line, the column name first and its type
 -- | second. A statement it cannot read yields no columns, which the drift check
 -- | reports as a mismatch rather than silently passing.
+-- |
+-- | A table whose name is quoted is skipped outright. Those exist for the
+-- | injection corpus, and their names hold the very characters this reader
+-- | splits on — a space, a comma, a `--`. The generator has no business in
+-- | them, so the drift check does not ask it to read them.
 parseSchemaSql :: String -> Array RawTable
 parseSchemaSql = Array.mapMaybe table <<< Array.drop 1 <<< split "CREATE TABLE "
   where
   table chunk = do
     name <- Array.head (words chunk)
+    guard (not (String.contains (String.Pattern "\"") name))
     body <- sliceBetween "(" ");" chunk
     pure { name, columns: Array.mapMaybe column (split "\n" body) }
 

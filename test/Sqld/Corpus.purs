@@ -1366,6 +1366,56 @@ handWritten =
         # from "users"
         # where_ (col "active" .== bool true)
     }
+
+  -- Identifier quoting ---------------------------------------------------------
+
+  -- Every name below would end its quoted region and continue as SQL of its
+  -- own if `quoteIdent` stopped doubling an embedded `"`. The fixture schema
+  -- really has these columns, so the harness proves the stronger thing a
+  -- golden test cannot: PostgreSQL parses each one back as a single
+  -- identifier, resolves it against the catalogue, and finds a column.
+  , { name: "identifier-embedded-quote"
+    , query: select' (cols [ "a\"b" ]) # from "quo\"ted"
+    }
+
+  , { name: "identifier-statement-terminator"
+    , query: select' (cols [ "; DROP TABLE users; --" ]) # from "quo\"ted"
+    }
+
+  , { name: "identifier-line-comment"
+    , query: select' (cols [ "-- comment" ]) # from "quo\"ted"
+    }
+
+  -- A hostile name survives the alias, join and ORDER BY paths too, not only
+  -- the two that name a table and a column.
+  , { name: "identifier-alias-and-order"
+    , query: select' [ as (tcol "q\"x" "a\"b") "al\"ias" ]
+        # fromAs "quo\"ted" "q\"x"
+        # where_ (tcol "q\"x" "; DROP TABLE users; --" .== str "x")
+        # orderBy [ asc (tcol "q\"x" "-- comment") ]
+    }
+
+  -- `col` splits on the first dot, so a column whose name contains one is
+  -- reachable only through `tcol` — which never splits. Without that escape
+  -- route `"a.b"` would be unaddressable.
+  , { name: "identifier-dot-not-split"
+    , query: select' [ expr (tcol "quo\"ted" "a.b") ] # from "quo\"ted"
+    }
+
+  -- A CTE names itself, so this one needs nothing from the schema.
+  , { name: "identifier-cte-name"
+    , query: select' (cols [ "id" ])
+        # from "c\"te"
+        # with_ "c\"te" (select' (cols [ "id" ]) # from "users")
+    }
+
+  -- The other half of the boundary: a value spelled as an attack is bound,
+  -- and PostgreSQL sees a parameter rather than the SQL it reads as.
+  , { name: "identifier-value-stays-bound"
+    , query: select' (cols [ "id" ])
+        # from "users"
+        # where_ (col "name" .== str "'; DROP TABLE users; --")
+    }
   ]
 
 -- ---------------------------------------------------------------------------
@@ -1379,7 +1429,15 @@ insertCorpus = insertHandWritten <> map asInsertEntry Cookbook.insertCookbook
 
 insertHandWritten :: Array InsertEntry
 insertHandWritten =
-  [ { name: "insert-values"
+  [ -- The INSERT path quotes its own table and column names rather than
+    -- sharing the SELECT formatter's, so it gets an adversarial name of its
+    -- own. See the identifier-quoting entries in `handWritten`.
+    { name: "insert-quoted-identifiers"
+    , insert: insertInto "quo\"ted" [ "a\"b", "; DROP TABLE users; --" ]
+        # values [ [ str "x", str "y" ] ]
+    }
+
+  , { name: "insert-values"
     , insert: insertInto "users" ["name", "email"]
         # values [[str "Alice", str "alice@example.com"]]
     }

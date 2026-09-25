@@ -559,6 +559,13 @@ descNullsFirst e = { expr: e, dir: Desc, nulls: Just NullsFirst }
 descNullsLast :: Expr -> OrderExpr
 descNullsLast e = { expr: e, dir: Desc, nulls: Just NullsLast }
 
+-- | Orders by a custom operator: `orderUsing "<" e` renders `e USING <`.
+-- |
+-- | **Trusted input only.** The operator is emitted verbatim, as
+-- | `Sqld.Expr.binOp`'s is — and a sort direction taken from a query string is
+-- | a realistic way for untrusted data to arrive here. Map the request's
+-- | vocabulary onto `asc` / `desc` / a fixed set of operators rather than
+-- | passing it through. See the security section of the README.
 orderUsing :: String -> Expr -> OrderExpr
 orderUsing op e = { expr: e, dir: OrderUsing op, nulls: Nothing }
 
