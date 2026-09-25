@@ -81,6 +81,7 @@ would reject, fails CI. Run them yourself with `spago run`.
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries, `default_`, `excluded` |
 | `Sqld.Select` | SELECT query builders, INSERT builders, UPDATE builders, DELETE builders, and select-list helpers |
 | `Sqld.Format` | `format`, `formatInline`, `formatPretty`, `formatInsert`, `formatInsertInline`, `formatInsertPretty`, `formatUpdateStmt`, `formatUpdateInline`, `formatUpdatePretty`, `formatDeleteStmt`, `formatDeleteInline`, `formatDeletePretty` |
+| `Sqld.Validate` | Opt-in checking: `validate`, `formatChecked` and their `INSERT` / `UPDATE` / `DELETE` counterparts, `FormatError`, `validIdentifier`, `validFunctionName` |
 
 ## API
 
@@ -962,6 +963,42 @@ case requestedDir of
   "desc" -> desc (col "score")
   _      -> asc (col "score")
 ```
+
+### Checking, when you want it
+
+`format` is total: it quotes what it can and emits the rest as written.
+`Sqld.Validate` is the opt-in second opinion, and reports the strings
+PostgreSQL will not accept before they are sent:
+
+```purescript
+import Sqld.Validate (formatChecked)
+
+case formatChecked query of
+  Right { sql, params } -> pool.query sql params
+  Left errs             -> logRejected errs
+-- Left [EmptyIdentifier ColumnName] for `cols [""]`
+```
+
+It checks the two things that can be checked exactly — an identifier must be
+non-empty and free of NUL, and a function name given to `app` must look like
+one (`COUNT`, `pg_catalog.count`), since it is emitted unquoted. It does **not**
+check operators, type names or `raw`: those stay trusted input, as the table
+above says. An operator is symbols or a keyword and the keywords cannot be
+enumerated — this library's own helpers emit `IN`, `LIKE` and `IS NULL`, and
+`IS DISTINCT FROM` and `AT TIME ZONE` are legitimate SQL an allowlist would
+reject. A type name has to admit `text[]`, `numeric(10,2)` and
+`double precision`, which leaves nothing to check but a handful of forbidden
+characters. A checker that rejected either would send you to `raw` for the
+cases it got wrong, which is worse than what it prevents.
+
+So `Right` means the names are well-formed. It does not mean the query is safe:
+an operator or a `raw` fragment built from untrusted input is still whatever
+you made it. Nothing replaces keeping request data out of those.
+
+Every corpus entry validates clean, including the adversarial identifiers —
+`a"b` and `; DROP TABLE users; --` are legal names, and a checker that rejected
+them would be reporting its dislike of the spelling rather than anything
+PostgreSQL cares about.
 
 ### The debug formatters
 

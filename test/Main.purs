@@ -14,6 +14,7 @@ import Test.Sqld.GenerateSpec (generateSpec)
 import Test.Sqld.InsertSpec (insertSpec)
 import Test.Sqld.SelectSpec (selectSpec)
 import Test.Sqld.UpdateSpec (updateSpec)
+import Test.Sqld.ValidateSpec (validateSpec)
 
 main :: Effect Unit
 main = do
@@ -30,4 +31,5 @@ main = do
     updateSpec
     deleteSpec
     corpusSpec
+    validateSpec
     generateSpec
