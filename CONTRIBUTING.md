@@ -206,3 +206,38 @@ the shape before writing much code.
 `raw` exists as the escape hatch for anything the builders do not cover. If you
 find yourself reaching for it often for the same construct, that is a good issue
 to file.
+
+### SQL/JSON
+
+PostgreSQL's own JSON operators — `->`, `->>`, `@>`, `<@`, `?`, `||`, `-` — are
+supported, with named helpers over them. The SQL:2016 *syntax* is a different
+and much larger surface, and the scoping question in #50 was settled as: in
+scope, in four steps, in this order.
+
+1. the shared plumbing — `FORMAT JSON`, `RETURNING <type>`, `ON ERROR` /
+   `ON EMPTY` — modelled **once** and shared rather than written per form (#66)
+2. the constructors and aggregates — `JSON_OBJECT`, `JSON_ARRAY`,
+   `JSON_OBJECTAGG`, `JSON_ARRAYAGG` (#67)
+3. the query functions — `JSON_QUERY`, `JSON_VALUE`, `JSON_EXISTS`, `IS JSON`
+   (#68)
+4. `JSON_TABLE` (#69)
+
+Each is its own issue with its own acceptance criteria. Later steps depend on
+earlier ones and nothing here should be started out of order — the plumbing is
+what stops the same `ON ERROR` clause being written four times. Step 1 emits no
+SQL by itself, so it has no corpus entry to write and lands as part of step 2's
+pull request rather than on its own.
+
+Accepting the sequence commits the project to specifying these, not to
+building them on any schedule.
+
+The harness validates against PostgreSQL 17 because steps 3 and 4 need it:
+those forms do not parse on 16 at all, so a corpus entry for them is impossible
+there, and the rule above admits no exceptions. Nothing in the library requires
+17 today.
+
+Two related pieces are tracked separately. The path operators `#>`, `#>>`, `?|`,
+`?&` and `#-` need a `text[]`, so they wait on the `ARRAY[…]` constructor
+(#70, blocked on #51) rather than growing a second array-literal escaper here.
+And the property-based generator does not yet build `jsonb` expressions (#71),
+which is why `TyJson` is the one `SqlType` that earns no operators of its own.
