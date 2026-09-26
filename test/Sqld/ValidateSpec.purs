@@ -17,7 +17,7 @@ import Sqld.Core (Statement(..))
 import Sqld.Expr (app, col, int, str, tcol, (.==))
 import Sqld.Select (as, cols, deleteFrom, deleteWhere, from, insertInto, select', set, update, where_, with_)
 import Sqld.Validate (FormatError(..), IdentRole(..), formatChecked, validFunctionName, validate)
-import Test.Sqld.Corpus (corpus, deleteCorpus, insertCorpus, updateCorpus)
+import Test.Sqld.Corpus (corpus)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
 
@@ -30,16 +30,7 @@ validateSpec = describe "Sqld.Validate" do
 
   describe "the corpus validates clean" do
     for_ corpus \entry -> it entry.name do
-      validate entry.query `shouldEqual` []
-
-    for_ insertCorpus \entry -> it entry.name do
-      validate entry.insert `shouldEqual` []
-
-    for_ updateCorpus \entry -> it entry.name do
-      validate entry.update `shouldEqual` []
-
-    for_ deleteCorpus \entry -> it entry.name do
-      validate entry.delete `shouldEqual` []
+      validate entry.statement `shouldEqual` []
 
   -- The names the security work added are hostile to read and perfectly legal
   -- to run. A checker that rejected them would be reporting its own dislike of

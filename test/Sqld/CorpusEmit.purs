@@ -16,9 +16,9 @@ import Effect (Effect)
 import Node.Encoding (Encoding(..))
 import Node.FS.Perms (permsAll)
 import Node.FS.Sync (mkdir', writeTextFile)
-import Example.Cookbook (DeleteExample, Example, InsertExample, UpdateExample, cookbook, deleteCookbook, insertCookbook, updateCookbook)
+import Example.Cookbook (Example, cookbook)
 import Sqld.Format (format, formatInline, formatPretty)
-import Test.Sqld.Corpus (CorpusEntry, DeleteEntry, InsertEntry, UpdateEntry, corpus, deleteCorpus, insertCorpus, updateCorpus)
+import Test.Sqld.Corpus (CorpusEntry, corpus)
 import Test.Sqld.Json (jsonString, literalJson)
 
 corpusDir :: String
@@ -44,7 +44,7 @@ emitExamplesJson = do
   writeTextFile UTF8 examplesPath examplesJson
 
 examplesJson :: String
-examplesJson = "[\n" <> intercalate ",\n" (map exampleJson cookbook <> map insertExampleJson insertCookbook <> map updateExampleJson updateCookbook <> map deleteExampleJson deleteCookbook) <> "\n]\n"
+examplesJson = "[\n" <> intercalate ",\n" (map exampleJson cookbook) <> "\n]\n"
 
 exampleJson :: Example -> String
 exampleJson example =
@@ -55,27 +55,13 @@ exampleJson example =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"prettySql\": "
-    <> jsonString (formatPretty example.query)
+    <> jsonString (formatPretty example.statement)
     <> " }"
   where
-  formatted = format example.query
-
-insertExampleJson :: InsertExample -> String
-insertExampleJson example =
-  "  { \"name\": " <> jsonString example.name
-    <> ", \"sql\": "
-    <> jsonString formatted.sql
-    <> ", \"params\": ["
-    <> intercalate ", " (map literalJson formatted.params)
-    <> "]"
-    <> ", \"prettySql\": "
-    <> jsonString (formatPretty example.insert)
-    <> " }"
-  where
-  formatted = format example.insert
+  formatted = format example.statement
 
 corpusJson :: String
-corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus <> map insertEntryJson insertCorpus <> map updateEntryJson updateCorpus <> map deleteEntryJson deleteCorpus) <> "\n]\n"
+corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus) <> "\n]\n"
 
 entryJson :: CorpusEntry -> String
 entryJson entry =
@@ -86,77 +72,7 @@ entryJson entry =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"inlineSql\": "
-    <> jsonString (formatInline entry.query)
+    <> jsonString (formatInline entry.statement)
     <> " }"
   where
-  formatted = format entry.query
-
-insertEntryJson :: InsertEntry -> String
-insertEntryJson entry =
-  "  { \"name\": " <> jsonString entry.name
-    <> ", \"sql\": "
-    <> jsonString formatted.sql
-    <> ", \"params\": ["
-    <> intercalate ", " (map literalJson formatted.params)
-    <> "]"
-    <> ", \"inlineSql\": "
-    <> jsonString (formatInline entry.insert)
-    <> " }"
-  where
-  formatted = format entry.insert
-
-updateExampleJson :: UpdateExample -> String
-updateExampleJson example =
-  "  { \"name\": " <> jsonString example.name
-    <> ", \"sql\": "
-    <> jsonString formatted.sql
-    <> ", \"params\": ["
-    <> intercalate ", " (map literalJson formatted.params)
-    <> "]"
-    <> ", \"prettySql\": "
-    <> jsonString (formatPretty example.update)
-    <> " }"
-  where
-  formatted = format example.update
-
-deleteExampleJson :: DeleteExample -> String
-deleteExampleJson example =
-  "  { \"name\": " <> jsonString example.name
-    <> ", \"sql\": "
-    <> jsonString formatted.sql
-    <> ", \"params\": ["
-    <> intercalate ", " (map literalJson formatted.params)
-    <> "]"
-    <> ", \"prettySql\": "
-    <> jsonString (formatPretty example.delete)
-    <> " }"
-  where
-  formatted = format example.delete
-
-updateEntryJson :: UpdateEntry -> String
-updateEntryJson entry =
-  "  { \"name\": " <> jsonString entry.name
-    <> ", \"sql\": "
-    <> jsonString formatted.sql
-    <> ", \"params\": ["
-    <> intercalate ", " (map literalJson formatted.params)
-    <> "]"
-    <> ", \"inlineSql\": "
-    <> jsonString (formatInline entry.update)
-    <> " }"
-  where
-  formatted = format entry.update
-
-deleteEntryJson :: DeleteEntry -> String
-deleteEntryJson entry =
-  "  { \"name\": " <> jsonString entry.name
-    <> ", \"sql\": "
-    <> jsonString formatted.sql
-    <> ", \"params\": ["
-    <> intercalate ", " (map literalJson formatted.params)
-    <> "]"
-    <> ", \"inlineSql\": "
-    <> jsonString (formatInline entry.delete)
-    <> " }"
-  where
-  formatted = format entry.delete
+  formatted = format entry.statement

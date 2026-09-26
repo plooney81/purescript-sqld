@@ -14,13 +14,7 @@
 -- | queries, so a typo in a column name is a test failure — that is the point.
 module Test.Sqld.Corpus
   ( CorpusEntry
-  , InsertEntry
-  , UpdateEntry
-  , DeleteEntry
   , corpus
-  , insertCorpus
-  , updateCorpus
-  , deleteCorpus
   , coveredTags
   , requiredTags
   , missingTags
@@ -31,16 +25,15 @@ import Prelude hiding (between, not, sub)
 import Data.Array ((:))
 import Data.Array (concatMap, difference, length, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust, maybe)
-import Example.Cookbook (cookbook, deleteCookbook, insertCookbook, updateCookbook) as Cookbook
+import Example.Cookbook (deleteExamples, insertExamples, selectExamples, updateExamples) as Cookbook
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query(..), Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update(..), Window, emptyWindow)
+import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query(..), Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Statement(..), Update(..), Window, emptyWindow)
 import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, default_, denseRank, eqAny, excluded, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, deleteFrom, deleteReturning, deleteWhere, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', set, skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, with_, withCte, withRecursive)
 
-type CorpusEntry = { name :: String, query :: Query }
-type InsertEntry = { name :: String, insert :: Insert }
-type UpdateEntry = { name :: String, update :: Update }
-type DeleteEntry = { name :: String, delete :: Delete }
+-- | One corpus entry: a name, and a statement of whichever kind. One type
+-- | rather than four, because every consumer treats them alike.
+type CorpusEntry = { name :: String, statement :: Statement }
 
 -- | A window shared by more than one corpus entry, so a named `Window` is
 -- | exercised alongside the ones built inline.
@@ -74,49 +67,57 @@ recentOrdersOfUser =
 
 -- | The hand-written corpus, plus every cookbook example — so a published
 -- | example cannot be SQL that PostgreSQL rejects.
+-- |
+-- | Each kind's examples follow that kind's hand-written entries rather than
+-- | all of them trailing at the end, which is the order `corpus.json` has
+-- | always been written in.
 corpus :: Array CorpusEntry
-corpus = handWritten <> map asEntry Cookbook.cookbook
+corpus =
+  selectHandWritten <> examples Cookbook.selectExamples
+    <> insertHandWritten <> examples Cookbook.insertExamples
+    <> updateHandWritten <> examples Cookbook.updateExamples
+    <> deleteHandWritten <> examples Cookbook.deleteExamples
   where
-  asEntry e = { name: "example-" <> e.name, query: e.query }
+  examples = map \e -> { name: "example-" <> e.name, statement: e.statement }
 
-handWritten :: Array CorpusEntry
-handWritten =
+selectHandWritten :: Array CorpusEntry
+selectHandWritten =
   [ { name: "select-star"
-    , query: select' [ star ] # from "users"
+    , statement: SelectStmt $ select' [ star ] # from "users"
     }
 
   , { name: "select-columns"
-    , query: select' (cols [ "id", "name", "email" ]) # from "users"
+    , statement: SelectStmt $ select' (cols [ "id", "name", "email" ]) # from "users"
     }
 
   , { name: "select-alias"
-    , query: select' [ as (col "created_at") "ts" ] # from "users"
+    , statement: SelectStmt $ select' [ as (col "created_at") "ts" ] # from "users"
     }
 
   , { name: "select-col-alias-shorthand"
-    , query: select' [ colAs "created_at" "ts" ] # from "users"
+    , statement: SelectStmt $ select' [ colAs "created_at" "ts" ] # from "users"
     }
 
   , { name: "select-qualified-columns"
-    , query: select' [ expr (tcol "u" "id"), expr (tcol "u" "name") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "id"), expr (tcol "u" "name") ]
         # fromAs "users" "u"
     }
 
   , { name: "select-qualified-alias"
-    , query: select' [ tcolAs "u" "created_at" "ts" ]
+    , statement: SelectStmt $ select' [ tcolAs "u" "created_at" "ts" ]
         # fromAs "users" "u"
     }
 
   , { name: "select-star-from-alias"
-    , query: select' [ starFrom "u" ] # fromAs "users" "u"
+    , statement: SelectStmt $ select' [ starFrom "u" ] # fromAs "users" "u"
     }
 
   , { name: "select-raw-expression"
-    , query: select' [ expr (raw "1 + 1") ]
+    , statement: SelectStmt $ select' [ expr (raw "1 + 1") ]
     }
 
   , { name: "select-aggregate-alias"
-    , query: select' [ expr (col "department"), as (raw "COUNT(*)") "n" ]
+    , statement: SelectStmt $ select' [ expr (col "department"), as (raw "COUNT(*)") "n" ]
         # from "users"
         # groupBy [ col "department" ]
     }
@@ -124,14 +125,14 @@ handWritten =
   -- DISTINCT -----------------------------------------------------------------
 
   , { name: "distinct"
-    , query: select' (cols [ "department" ]) # distinct # from "users"
+    , statement: SelectStmt $ select' (cols [ "department" ]) # distinct # from "users"
     }
 
   -- PostgreSQL requires the leading ORDER BY expressions to match the
   -- DISTINCT ON ones, which is the rule this entry is here to hold us to:
   -- swap the two ORDER BY terms and PREPARE fails.
   , { name: "distinct-on"
-    , query: select' (cols [ "user_id", "total" ])
+    , statement: SelectStmt $ select' (cols [ "user_id", "total" ])
         # distinctOn [ col "user_id" ]
         # from "orders"
         # orderBy [ asc (col "user_id"), desc (col "placed_at") ]
@@ -142,7 +143,7 @@ handWritten =
   -- here: two occurrences of the same expression would carry different
   -- parameter numbers, and PostgreSQL matches them as written.
   , { name: "distinct-on-parameter-ordering"
-    , query: select' (cols [ "user_id", "total" ])
+    , statement: SelectStmt $ select' (cols [ "user_id", "total" ])
         # distinctOn [ coalesce [ col "status", str "unknown" ] ]
         # from "orders"
         # where_ (col "total" .> num 10.0)
@@ -151,29 +152,29 @@ handWritten =
   -- Literals -----------------------------------------------------------------
 
   , { name: "literal-int"
-    , query: select' [ star ] # from "users" # where_ (col "id" .== int 42)
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (col "id" .== int 42)
     }
 
   , { name: "literal-string-with-quote"
-    , query: select' [ star ] # from "users" # where_ (col "name" .!= str "O'Brien")
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (col "name" .!= str "O'Brien")
     }
 
   , { name: "literal-number"
-    , query: select' [ star ] # from "users" # where_ (col "score" .>= num 4.5)
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (col "score" .>= num 4.5)
     }
 
   , { name: "literal-boolean"
-    , query: select' [ star ] # from "users" # where_ (col "active" .== bool true)
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (col "active" .== bool true)
     }
 
   , { name: "literal-null"
-    , query: select' [ star ] # from "users" # where_ (col "email" .== null)
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (col "email" .== null)
     }
 
   -- Comparison operators -----------------------------------------------------
 
   , { name: "comparison-operators"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_
             ( and
@@ -188,29 +189,29 @@ handWritten =
   -- Boolean combinators ------------------------------------------------------
 
   , { name: "boolean-or"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (or [ col "active" .== bool true, isNull (col "email") ])
     }
 
   , { name: "boolean-not"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (not (col "active" .== bool true))
     }
 
   , { name: "boolean-and-empty"
-    , query: select' [ star ] # from "users" # where_ (and [])
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (and [])
     }
 
   , { name: "boolean-or-empty"
-    , query: select' [ star ] # from "users" # where_ (or [])
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (or [])
     }
 
   -- Null tests ---------------------------------------------------------------
 
   , { name: "is-null-and-is-not-null"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (and [ isNull (col "email"), isNotNull (col "name") ])
     }
@@ -218,13 +219,13 @@ handWritten =
   -- Set membership -----------------------------------------------------------
 
   , { name: "in-list"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (in_ (col "department") [ str "engineering", str "sales" ])
     }
 
   , { name: "not-in-list"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (notIn (col "id") [ int 1, int 2, int 3 ])
     }
@@ -233,13 +234,13 @@ handWritten =
   -- which PostgreSQL rejects. These entries are here to prove that: without the
   -- fold, PREPARE fails on them.
   , { name: "in-list-empty"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (in_ (col "department") [])
     }
 
   , { name: "not-in-list-empty"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (notIn (col "id") [])
     }
@@ -247,7 +248,7 @@ handWritten =
   -- The folded constant under AND / OR / NOT — the positions where bracketing
   -- would change the meaning if it were not an atom.
   , { name: "in-list-empty-nested"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_
             ( and
@@ -261,17 +262,17 @@ handWritten =
   -- Pattern matching ---------------------------------------------------------
 
   , { name: "like"
-    , query: select' [ star ] # from "users" # where_ (like (col "name") "A%")
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (like (col "name") "A%")
     }
 
   , { name: "ilike"
-    , query: select' [ star ] # from "users" # where_ (ilike (col "email") "%@example.com")
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (ilike (col "email") "%@example.com")
     }
 
   -- Ranges -------------------------------------------------------------------
 
   , { name: "between"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (between (col "age") (int 18) (int 65))
     }
@@ -286,13 +287,13 @@ handWritten =
   -- comparison inside a comparison until the generator did.
 
   , { name: "nonassoc-between-under-in"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (in_ (between (col "age") (int 18) (int 65)) [ bool true ])
     }
 
   , { name: "nonassoc-comparison-under-comparison"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ ((col "age" .< int 5) .== bool true)
     }
@@ -300,19 +301,19 @@ handWritten =
   -- Raw escape hatch ---------------------------------------------------------
 
   , { name: "where-raw"
-    , query: select' [ star ] # from "users" # where_ (raw "age % 2 = 0")
+    , statement: SelectStmt $ select' [ star ] # from "users" # where_ (raw "age % 2 = 0")
     }
 
   -- Joins --------------------------------------------------------------------
 
   , { name: "inner-join"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "orders"
         # innerJoin "users" (tcol "orders" "user_id" .== tcol "users" "id")
     }
 
   , { name: "left-join-with-aliases"
-    , query: select' [ expr (tcol "u" "id"), expr (tcol "p" "bio") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "id"), expr (tcol "p" "bio") ]
         # fromAs "users" "u"
         # leftJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
         # where_ (tcol "u" "active" .== bool true)
@@ -321,19 +322,19 @@ handWritten =
     }
 
   , { name: "right-join"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # rightJoin "profiles" (tcol "users" "id" .== tcol "profiles" "user_id")
     }
 
   , { name: "full-join"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # fromAs "users" "u"
         # fullJoinAs "profiles" "p" (tcol "u" "id" .== tcol "p" "user_id")
     }
 
   , { name: "cross-join"
-    , query: select' [ starFrom "users" ]
+    , statement: SelectStmt $ select' [ starFrom "users" ]
         # from "users"
         # crossJoin "departments"
     }
@@ -341,7 +342,7 @@ handWritten =
   -- A derived join target carries parameters; a CROSS JOIN carries none of its
   -- own, so the WHERE clause's are numbered after the subquery's.
   , { name: "cross-join-derived"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # fromAs "users" "u"
         # joinRel (derived paidOrders "paid") Cross
         # where_ (tcol "u" "active" .== bool true)
@@ -350,13 +351,13 @@ handWritten =
   -- USING collapses the joined column to one, which is why "user_id" is
   -- unambiguous in the select list here and would not be under ON.
   , { name: "join-using"
-    , query: select' (cols [ "user_id" ])
+    , statement: SelectStmt $ select' (cols [ "user_id" ])
         # from "orders"
         # joinUsing InnerJoin "profiles" [ "user_id" ]
     }
 
   , { name: "join-using-multiple-columns"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "orders"
         # joinUsing LeftJoin "profiles" [ "id", "user_id" ]
     }
@@ -365,7 +366,7 @@ handWritten =
   -- which is what NATURAL finds. PostgreSQL rejects a natural join with no
   -- common column at all, so this entry is also a check on the fixture schema.
   , { name: "natural-join"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # naturalJoin LeftJoin "departments"
     }
@@ -373,7 +374,7 @@ handWritten =
   -- Grouping -----------------------------------------------------------------
 
   , { name: "group-by-having"
-    , query: select' [ expr (col "department"), as (raw "COUNT(*)") "headcount" ]
+    , statement: SelectStmt $ select' [ expr (col "department"), as (raw "COUNT(*)") "headcount" ]
         # from "users"
         # groupBy [ col "department" ]
         # having (raw "COUNT(*)" .> int 5)
@@ -385,7 +386,7 @@ handWritten =
   -- keyword: a set that swallowed its neighbour would group by the wrong
   -- columns and be rejected.
   , { name: "group-by-grouping-sets"
-    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+    , statement: SelectStmt $ select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
         # from "users"
         # groupBySets
             [ [ col "department" ]
@@ -395,13 +396,13 @@ handWritten =
     }
 
   , { name: "group-by-rollup"
-    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+    , statement: SelectStmt $ select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
         # from "users"
         # groupByRollup [ col "department", col "active" ]
     }
 
   , { name: "group-by-cube"
-    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+    , statement: SelectStmt $ select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
         # from "users"
         # groupByCube [ col "department", col "active" ]
     }
@@ -409,7 +410,7 @@ handWritten =
   -- A plain grouping and a ROLLUP in the one clause: `GROUP BY "department",
   -- ROLLUP ("active")`, which is what making `groupBy` additive buys.
   , { name: "group-by-plain-and-rollup"
-    , query: select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
+    , statement: SelectStmt $ select' (cols [ "department", "active" ] <> [ as countStar "headcount" ])
         # from "users"
         # groupBy [ col "department" ]
         # groupByRollup [ col "active" ]
@@ -419,7 +420,7 @@ handWritten =
   -- data: it is 1 where the column was rolled up and 0 where it was grouped by.
   -- No builder of its own — the generic `app` node already reaches it.
   , { name: "group-by-grouping-function"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "department" ] <>
             [ as (app "GROUPING" [ col "department" ]) "is_total"
             , as countStar "headcount"
@@ -435,7 +436,7 @@ handWritten =
   -- — where it would carry a different parameter number and PostgreSQL, which
   -- matches the two as written, would reject the query.
   , { name: "group-by-rollup-parameters"
-    , query: select' [ as countStar "headcount" ]
+    , statement: SelectStmt $ select' [ as countStar "headcount" ]
         # from "users"
         # where_ (col "active" .== bool true)
         # groupByRollup [ coalesce [ col "department", str "unknown" ] ]
@@ -447,7 +448,7 @@ handWritten =
   -- one over the whole group, both from the single pass a `WHERE` clause would
   -- have narrowed for all of them.
   , { name: "aggregate-filter-count"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "department" ] <>
             [ as (countStar `filterWhere` (col "active" .== bool true)) "active_count"
             , as countStar "total"
@@ -458,7 +459,7 @@ handWritten =
     }
 
   , { name: "aggregate-filter-sum"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "user_id" ] <>
             [ as (sum_ (col "total") `filterWhere` (col "status" .== str "paid")) "paid_total" ]
         )
@@ -471,7 +472,7 @@ handWritten =
   -- with its result. Emitting the two the other way round would not parse, so
   -- this entry is what holds the ordering.
   , { name: "aggregate-filter-over"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "user_id", "total" ] <>
             [ as
                 ( ( sum_ (col "total") `filterWhere` (col "status" .== str "paid")
@@ -486,7 +487,7 @@ handWritten =
   -- A filtered aggregate is legal in `HAVING`, where it decides which groups
   -- survive rather than what they report.
   , { name: "aggregate-filter-having"
-    , query: select' (cols [ "department" ] <> [ as countStar "headcount" ])
+    , statement: SelectStmt $ select' (cols [ "department" ] <> [ as countStar "headcount" ])
         # from "users"
         # groupBy [ col "department" ]
         # having ((countStar `filterWhere` (col "active" .== bool true)) .> int 1)
@@ -496,7 +497,7 @@ handWritten =
   -- subtraction around it brackets nothing — and PostgreSQL parses what we
   -- emit.
   , { name: "aggregate-filter-in-expression"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "department" ] <>
             [ as
                 ( binOp "-" countStar
@@ -512,7 +513,7 @@ handWritten =
   -- The predicate's parameter sits in the select list, so it is numbered ahead
   -- of the WHERE clause's.
   , { name: "aggregate-filter-parameters"
-    , query: select' [ as (countStar `filterWhere` (col "age" .>= int 21)) "adults" ]
+    , statement: SelectStmt $ select' [ as (countStar `filterWhere` (col "age" .>= int 21)) "adults" ]
         # from "users"
         # where_ (col "active" .== bool true)
     }
@@ -520,47 +521,47 @@ handWritten =
   -- Ordering / pagination ----------------------------------------------------
 
   , { name: "order-by-asc"
-    , query: select' [ star ] # from "users" # orderBy [ asc (col "name") ]
+    , statement: SelectStmt $ select' [ star ] # from "users" # orderBy [ asc (col "name") ]
     }
 
   , { name: "order-by-multiple"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # orderBy [ asc (col "department"), desc (col "created_at") ]
     }
 
   , { name: "order-by-desc-nulls-last"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "articles"
         # orderBy [ descNullsLast (col "published_at"), asc (col "title") ]
     }
 
   , { name: "order-by-asc-nulls-first"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # orderBy [ ascNullsFirst (col "email") ]
     }
 
   , { name: "order-by-desc-nulls-first"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # orderBy [ descNullsFirst (col "score") ]
     }
 
   , { name: "order-by-asc-nulls-last"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # orderBy [ ascNullsLast (col "email") ]
     }
 
   , { name: "order-by-using"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # orderBy [ orderUsing "<" (col "name") ]
     }
 
   , { name: "limit-offset"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "articles"
         # orderBy [ desc (col "published_at") ]
         # limit 10
@@ -570,7 +571,7 @@ handWritten =
   -- `LIMIT ALL` is PostgreSQL's way of saying "no limit", equivalent to omitting
   -- the clause. It is a keyword, not a parameter, so it adds no bindings.
   , { name: "limit-all"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "articles"
         # limitAll
     }
@@ -584,7 +585,7 @@ handWritten =
   -- entry below is a plain row-returning SELECT.
 
   , { name: "for-update"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "orders"
         # where_ (col "status" .== str "pending")
         # forUpdate
@@ -593,7 +594,7 @@ handWritten =
   -- The work queue: `LIMIT … FOR UPDATE SKIP LOCKED` hands each worker the
   -- first rows no other worker holds, rather than making it wait behind them.
   , { name: "for-update-skip-locked"
-    , query: select' (cols [ "id", "total" ])
+    , statement: SelectStmt $ select' (cols [ "id", "total" ])
         # from "orders"
         # where_ (col "status" .== str "pending")
         # orderBy [ asc (col "placed_at") ]
@@ -603,19 +604,19 @@ handWritten =
     }
 
   , { name: "for-update-nowait"
-    , query: select' [ star ] # from "orders" # forUpdate # noWait
+    , statement: SelectStmt $ select' [ star ] # from "orders" # forUpdate # noWait
     }
 
   , { name: "for-no-key-update"
-    , query: select' [ star ] # from "users" # forNoKeyUpdate
+    , statement: SelectStmt $ select' [ star ] # from "users" # forNoKeyUpdate
     }
 
   , { name: "for-share"
-    , query: select' [ star ] # from "users" # forShare
+    , statement: SelectStmt $ select' [ star ] # from "users" # forShare
     }
 
   , { name: "for-key-share"
-    , query: select' [ star ] # from "users" # forKeyShare
+    , statement: SelectStmt $ select' [ star ] # from "users" # forKeyShare
     }
 
   -- `OF` names FROM items by the name they go by in the query, so this locks
@@ -623,7 +624,7 @@ handWritten =
   -- name that is not in the FROM list — and rejects the table name of an
   -- aliased relation — so the quoting of the alias is what this entry holds.
   , { name: "for-update-of"
-    , query: select' [ starFrom "o" ]
+    , statement: SelectStmt $ select' [ starFrom "o" ]
         # fromAs "orders" "o"
         # innerJoin "users" (tcol "o" "user_id" .== tcol "users" "id")
         # forUpdate
@@ -634,7 +635,7 @@ handWritten =
   -- order is locked for writing while the user it belongs to is merely held
   -- against change.
   , { name: "for-update-of-and-for-share-of"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "orders"
         # innerJoin "users" (tcol "orders" "user_id" .== tcol "users" "id")
         # forUpdate
@@ -647,7 +648,7 @@ handWritten =
   -- keep the numbers they would have had without it — which is what this entry
   -- is here to confirm.
   , { name: "for-update-after-parameters"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "orders"
         # where_ (and [ col "status" .== str "pending", col "total" .> num 10.0 ])
         # limit 5
@@ -659,7 +660,7 @@ handWritten =
   -- Everything at once -------------------------------------------------------
 
   , { name: "kitchen-sink"
-    , query: select' [ tcolAs "u" "id" "user_id", as (raw "COUNT(o.id)") "order_count" ]
+    , statement: SelectStmt $ select' [ tcolAs "u" "id" "user_id", as (raw "COUNT(o.id)") "order_count" ]
         # fromAs "users" "u"
         # leftJoinAs "orders" "o" (tcol "u" "id" .== tcol "o" "user_id")
         # where_
@@ -679,11 +680,11 @@ handWritten =
   -- Function application (App) -----------------------------------------------
 
   , { name: "app-count-star"
-    , query: select' [ as countStar "n" ] # from "users"
+    , statement: SelectStmt $ select' [ as countStar "n" ] # from "users"
     }
 
   , { name: "app-aggregates"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ expr (col "department")
         , as (count (col "id")) "headcount"
         , as (App "MAX" [ col "age" ]) "oldest"
@@ -693,14 +694,14 @@ handWritten =
     }
 
   , { name: "app-nested"
-    , query: select' [ as (upper (coalesce [ col "email", str "none" ])) "email" ]
+    , statement: SelectStmt $ select' [ as (upper (coalesce [ col "email", str "none" ])) "email" ]
         # from "users"
     }
 
   -- Operators (BinOp) --------------------------------------------------------
 
   , { name: "binop-concat"
-    , query: select' [ as (binOp "||" (col "name") (col "department")) "label" ]
+    , statement: SelectStmt $ select' [ as (binOp "||" (col "name") (col "department")) "label" ]
         # from "users"
     }
 
@@ -708,13 +709,13 @@ handWritten =
   -- precedence printer this renders as "age" + $1 * $2, which means something
   -- entirely different and which PostgreSQL would happily accept.
   , { name: "binop-arithmetic-precedence"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (binOp "*" (binOp "+" (col "age") (int 1)) (int 2) .> int 10)
     }
 
   , { name: "binop-not-like"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (and [ notLike (col "email") "%@spam.test", notILike (col "name") "test%" ])
     }
@@ -722,12 +723,12 @@ handWritten =
   -- Casts --------------------------------------------------------------------
 
   , { name: "cast-simple"
-    , query: select' [ as (cast (col "id") "text") "id_text" ]
+    , statement: SelectStmt $ select' [ as (cast (col "id") "text") "id_text" ]
         # from "users"
     }
 
   , { name: "cast-compound-operand"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_ (cast (binOp "+" (col "age") (int 1)) "numeric" .>= num 1.5)
     }
@@ -739,7 +740,7 @@ handWritten =
   -- atom — so only `formatInline` ever emitted the broken SQL, and only this
   -- entry's second form catches it.
   , { name: "cast-negative-literal"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ as (cast (int (-1)) "text") "i"
         , as (cast (num (-1.5)) "text") "n"
         ]
@@ -748,7 +749,7 @@ handWritten =
   -- Subqueries (Sub) ---------------------------------------------------------
 
   , { name: "sub-scalar-correlated"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ expr (tcol "u" "id")
         , as
             ( sub
@@ -763,7 +764,7 @@ handWritten =
     }
 
   , { name: "sub-in"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_
             ( inSub (col "id")
@@ -772,7 +773,7 @@ handWritten =
     }
 
   , { name: "sub-not-in"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_
             ( notInSub (col "id")
@@ -784,7 +785,7 @@ handWritten =
     }
 
   , { name: "sub-exists"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # fromAs "users" "u"
         # where_
             ( exists
@@ -796,7 +797,7 @@ handWritten =
     }
 
   , { name: "sub-not-exists"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # fromAs "users" "u"
         # where_
             ( notExists
@@ -810,7 +811,7 @@ handWritten =
   -- Quantified comparisons (ANY / ALL) ----------------------------------------
 
   , { name: "any-subquery"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "users"
         # where_
             ( eqAny (col "id")
@@ -821,7 +822,7 @@ handWritten =
     }
 
   , { name: "all-subquery"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "orders"
         # where_
             ( allOf ">" (col "total")
@@ -837,7 +838,7 @@ handWritten =
   -- Parameters inside a quantified subquery are numbered in step with the
   -- outer query, as they are for IN (SELECT …).
   , { name: "any-subquery-parameter-ordering"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # fromAs "users" "u"
         # where_
             ( and
@@ -855,7 +856,7 @@ handWritten =
 
   -- The general `anyOf` with an operator other than `=`.
   , { name: "any-subquery-operator"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # from "orders"
         # where_
             ( anyOf "<" (col "total")
@@ -871,7 +872,7 @@ handWritten =
   -- Select-list composition ---------------------------------------------------
 
   , { name: "mixed-select-list"
-    , query: select' (cols [ "department" ] <> exprs [ avg (col "age") ] <> [ as countStar "headcount" ])
+    , statement: SelectStmt $ select' (cols [ "department" ] <> exprs [ avg (col "age") ] <> [ as countStar "headcount" ])
         # from "users"
         # groupBy [ col "department" ]
     }
@@ -879,14 +880,14 @@ handWritten =
   -- Dot-qualified column references ------------------------------------------
 
   , { name: "dotted-column-references"
-    , query: select' (cols [ "orders.id", "users.name" ])
+    , statement: SelectStmt $ select' (cols [ "orders.id", "users.name" ])
         # from "orders"
         # innerJoin "users" (col "orders.user_id" .== col "users.id")
         # where_ (col "orders.status" .== str "paid")
     }
 
   , { name: "dotted-column-references-aliased"
-    , query: select' (tcols "u" [ "id", "name" ] <> cols [ "p.bio" ])
+    , statement: SelectStmt $ select' (tcols "u" [ "id", "name" ] <> cols [ "p.bio" ])
         # fromAs "users" "u"
         # leftJoinAs "profiles" "p" (col "u.id" .== col "p.user_id")
     }
@@ -894,7 +895,7 @@ handWritten =
   -- Derived tables -----------------------------------------------------------
 
   , { name: "derived-table"
-    , query: select' [ starFrom "recent" ]
+    , statement: SelectStmt $ select' [ starFrom "recent" ]
         # fromSub
             ( select' (cols [ "id", "user_id", "total" ])
                 # from "orders"
@@ -904,7 +905,7 @@ handWritten =
     }
 
   , { name: "derived-table-aggregate"
-    , query: select' [ expr (tcol "u" "name"), expr (tcol "totals" "order_count") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "name"), expr (tcol "totals" "order_count") ]
         # fromAs "users" "u"
         # joinOn InnerJoin
             ( derived
@@ -920,7 +921,7 @@ handWritten =
   -- A derived table's parameters sit earlier in the SQL than the outer
   -- WHERE's, so they must be numbered first.
   , { name: "derived-table-parameter-ordering"
-    , query: select' [ starFrom "recent" ]
+    , statement: SelectStmt $ select' [ starFrom "recent" ]
         # fromSub
             ( select' (cols [ "id", "user_id", "total" ])
                 # from "orders"
@@ -935,7 +936,7 @@ handWritten =
   -- The shape LATERAL exists for: a per-row subquery, joined ON TRUE because
   -- the correlation inside it is the whole of the matching.
   , { name: "join-lateral"
-    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
         # fromAs "users" "u"
         # joinLateral recentOrdersOfUser "recent"
     }
@@ -945,7 +946,7 @@ handWritten =
   -- a lateral reference from the right operand of either — so these two
   -- builders are the whole of it.
   , { name: "left-join-lateral"
-    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
         # fromAs "users" "u"
         # leftJoinLateral recentOrdersOfUser "recent"
     }
@@ -953,7 +954,7 @@ handWritten =
   -- CROSS JOIN LATERAL says the same thing as `joinLateral` without the ON
   -- clause, and is how the comma form of a lateral join is spelled here.
   , { name: "cross-join-lateral"
-    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
         # fromAs "users" "u"
         # joinRel (lateral recentOrdersOfUser "recent") Cross
     }
@@ -962,7 +963,7 @@ handWritten =
   -- and both sit ahead of the outer WHERE: $1 is the subquery's, $2 the ON
   -- clause's, $3 the WHERE's.
   , { name: "join-lateral-parameter-ordering"
-    , query: select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "name"), expr (tcol "recent" "total") ]
         # fromAs "users" "u"
         # joinOn InnerJoin
             ( lateral
@@ -987,7 +988,7 @@ handWritten =
   -- references nothing — PostgreSQL accepts it, which is what this entry
   -- confirms.
   , { name: "from-lateral"
-    , query: select' [ starFrom "recent" ]
+    , statement: SelectStmt $ select' [ starFrom "recent" ]
         # fromLateral
             ( select' (cols [ "id", "user_id", "total" ])
                 # from "orders"
@@ -999,7 +1000,7 @@ handWritten =
   -- Common table expressions --------------------------------------------------
 
   , { name: "with-cte"
-    , query: select' [ starFrom "recent" ]
+    , statement: SelectStmt $ select' [ starFrom "recent" ]
         # with_ "recent"
             ( select' [ star ]
                 # from "orders"
@@ -1011,7 +1012,7 @@ handWritten =
   -- A later CTE may reference an earlier one, and the outer query treats both
   -- as ordinary relations.
   , { name: "with-cte-multiple"
-    , query: select' [ expr (tcol "u" "name"), expr (tcol "spend" "total") ]
+    , statement: SelectStmt $ select' [ expr (tcol "u" "name"), expr (tcol "spend" "total") ]
         # with_ "paid"
             ( select' (cols [ "user_id", "total" ])
                 # from "orders"
@@ -1027,7 +1028,7 @@ handWritten =
     }
 
   , { name: "with-cte-column-list"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # withCte
             ( cteColumns [ "user_id", "spend" ]
                 ( cte "totals"
@@ -1043,7 +1044,7 @@ handWritten =
   -- A CTE's parameters sit ahead of every other clause in the emitted SQL, so
   -- they are numbered first.
   , { name: "with-cte-parameter-ordering"
-    , query: select' [ starFrom "recent" ]
+    , statement: SelectStmt $ select' [ starFrom "recent" ]
         # with_ "recent"
             ( select' (cols [ "id", "user_id", "total" ])
                 # from "orders"
@@ -1057,7 +1058,7 @@ handWritten =
   -- anchor's literal is `raw` rather than `int`: a bare parameter in a select
   -- list gives PostgreSQL nothing to infer a type from, and PREPARE rejects it.
   , { name: "with-recursive"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # withRecursive "counting"
             ( select' [ as (raw "1") "n" ]
                 # unionAll
@@ -1072,7 +1073,7 @@ handWritten =
   -- RECURSIVE is a property of the clause, not the entry: one recursive CTE
   -- makes the whole WITH recursive, and the non-recursive one still works.
   , { name: "with-recursive-mixed"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # with_ "paid"
             ( select' (cols [ "user_id" ])
                 # from "orders"
@@ -1099,37 +1100,37 @@ handWritten =
   -- Set operations -------------------------------------------------------------
 
   , { name: "set-op-union"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # union (select' (cols [ "user_id" ]) # from "orders")
     }
 
   , { name: "set-op-union-all"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # unionAll (select' (cols [ "user_id" ]) # from "orders")
     }
 
   , { name: "set-op-intersect"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # intersect (select' (cols [ "user_id" ]) # from "orders")
     }
 
   , { name: "set-op-intersect-all"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # intersectAll (select' (cols [ "user_id" ]) # from "profiles")
     }
 
   , { name: "set-op-except"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # except (select' (cols [ "user_id" ]) # from "orders")
     }
 
   , { name: "set-op-except-all"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # exceptAll (select' (cols [ "user_id" ]) # from "profiles")
     }
@@ -1137,7 +1138,7 @@ handWritten =
   -- Both operands are bracketed, so a chain of mixed operators does not depend
   -- on PostgreSQL's precedence between UNION and INTERSECT.
   , { name: "set-op-chained"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # union (select' (cols [ "user_id" ]) # from "orders")
         # except (select' (cols [ "user_id" ]) # from "profiles")
@@ -1146,7 +1147,7 @@ handWritten =
   -- ORDER BY, LIMIT and OFFSET after a set operation apply to the combined
   -- result: they are emitted outside the brackets.
   , { name: "set-op-order-by-limit"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # union (select' (cols [ "user_id" ]) # from "orders")
         # orderBy [ asc (col "id") ]
@@ -1157,7 +1158,7 @@ handWritten =
   -- And an operand keeps an ORDER BY and LIMIT of its own, because it is
   -- bracketed.
   , { name: "set-op-operand-order-by-limit"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # orderBy [ asc (col "id") ]
         # limit 5
@@ -1171,7 +1172,7 @@ handWritten =
 
   -- Parameters are numbered left to right across both operands.
   , { name: "set-op-parameter-ordering"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # where_ (col "active" .== bool true)
         # union
@@ -1185,7 +1186,7 @@ handWritten =
   -- A WITH clause on a set operation covers the whole statement, and its
   -- parameters precede both operands'.
   , { name: "set-op-with-cte"
-    , query: select' (cols [ "user_id" ])
+    , statement: SelectStmt $ select' (cols [ "user_id" ])
         # from "paid"
         # union
             ( select' (cols [ "user_id" ])
@@ -1201,7 +1202,7 @@ handWritten =
 
   -- A set operation is a query like any other, so it nests wherever one can.
   , { name: "set-op-derived-table"
-    , query: select' [ as countStar "n" ]
+    , statement: SelectStmt $ select' [ as countStar "n" ]
         # fromSub
             ( select' (cols [ "id" ])
                 # from "users"
@@ -1212,7 +1213,7 @@ handWritten =
 
   -- Subquery parameters must keep numbering in step with the outer query.
   , { name: "sub-parameter-ordering"
-    , query: select' [ star ]
+    , statement: SelectStmt $ select' [ star ]
         # fromAs "users" "u"
         # where_
             ( and
@@ -1235,7 +1236,7 @@ handWritten =
   -- Window functions -----------------------------------------------------------
 
   , { name: "window-row-number"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "name", "department" ] <>
             [ as
                 ( rowNumber `over`
@@ -1251,12 +1252,12 @@ handWritten =
 
   -- An empty window is `OVER ()`: one partition, unordered, unframed.
   , { name: "window-empty"
-    , query: select' (cols [ "id" ] <> [ as (countStar `over` emptyWindow) "total" ])
+    , statement: SelectStmt $ select' (cols [ "id" ] <> [ as (countStar `over` emptyWindow) "total" ])
         # from "users"
     }
 
   , { name: "window-rank-dense-rank"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "name" ] <>
             [ as (rank `over` orderWindow' [ desc (col "score") ]) "rank"
             , as (denseRank `over` orderWindow' [ desc (col "score") ]) "dense_rank"
@@ -1267,7 +1268,7 @@ handWritten =
 
   -- A named window, shared by two columns: `over` takes the `Window` itself.
   , { name: "window-lag-lead"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "placed_at", "total" ] <>
             [ as (lag (col "total") 1 `over` byUser) "previous_total"
             , as (lead (col "total") 1 `over` byUser) "next_total"
@@ -1279,7 +1280,7 @@ handWritten =
   -- A running total: the frame runs from the start of the partition to the
   -- current row.
   , { name: "window-frame-rows"
-    , query: select'
+    , statement: SelectStmt $ select'
         ( cols [ "user_id", "total" ] <>
             [ as
                 ( sum_ (col "total")
@@ -1293,7 +1294,7 @@ handWritten =
 
   -- Offset bounds are emitted literally rather than as parameters.
   , { name: "window-frame-rows-offsets"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ as
             ( avg (col "total") `over`
                 ( orderWindow' [ asc (col "placed_at") ]
@@ -1306,7 +1307,7 @@ handWritten =
     }
 
   , { name: "window-frame-range"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ as
             ( sum_ (col "total") `over`
                 ( orderWindow' [ asc (col "placed_at") ]
@@ -1321,7 +1322,7 @@ handWritten =
   -- PostgreSQL requires an ordered window in GROUPS mode, and the harness is
   -- what holds us to that.
   , { name: "window-frame-groups"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ as
             ( sum_ (col "total") `over`
                 ( orderWindow' [ asc (col "placed_at") ]
@@ -1335,7 +1336,7 @@ handWritten =
 
   -- The one-bound form, `ROWS UNBOUNDED PRECEDING`, runs to the current row.
   , { name: "window-frame-one-bound"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ as
             ( sum_ (col "total") `over`
                 ( orderWindow' [ asc (col "placed_at") ]
@@ -1349,7 +1350,7 @@ handWritten =
 
   -- A window function is legal in ORDER BY as well as in SELECT.
   , { name: "window-in-order-by"
-    , query: select' (cols [ "name" ])
+    , statement: SelectStmt $ select' (cols [ "name" ])
         # from "users"
         # orderBy [ asc (rank `over` orderWindow' [ desc (col "score") ]) ]
     }
@@ -1357,7 +1358,7 @@ handWritten =
   -- A window's parameters sit in the select list, so they are numbered before
   -- the WHERE clause's.
   , { name: "window-parameter-ordering"
-    , query: select'
+    , statement: SelectStmt $ select'
         [ as
             ( countStar `over` partitionBy' [ coalesce [ col "department", str "unknown" ] ]
             )
@@ -1375,21 +1376,21 @@ handWritten =
   -- golden test cannot: PostgreSQL parses each one back as a single
   -- identifier, resolves it against the catalogue, and finds a column.
   , { name: "identifier-embedded-quote"
-    , query: select' (cols [ "a\"b" ]) # from "quo\"ted"
+    , statement: SelectStmt $ select' (cols [ "a\"b" ]) # from "quo\"ted"
     }
 
   , { name: "identifier-statement-terminator"
-    , query: select' (cols [ "; DROP TABLE users; --" ]) # from "quo\"ted"
+    , statement: SelectStmt $ select' (cols [ "; DROP TABLE users; --" ]) # from "quo\"ted"
     }
 
   , { name: "identifier-line-comment"
-    , query: select' (cols [ "-- comment" ]) # from "quo\"ted"
+    , statement: SelectStmt $ select' (cols [ "-- comment" ]) # from "quo\"ted"
     }
 
   -- A hostile name survives the alias, join and ORDER BY paths too, not only
   -- the two that name a table and a column.
   , { name: "identifier-alias-and-order"
-    , query: select' [ as (tcol "q\"x" "a\"b") "al\"ias" ]
+    , statement: SelectStmt $ select' [ as (tcol "q\"x" "a\"b") "al\"ias" ]
         # fromAs "quo\"ted" "q\"x"
         # where_ (tcol "q\"x" "; DROP TABLE users; --" .== str "x")
         # orderBy [ asc (tcol "q\"x" "-- comment") ]
@@ -1399,12 +1400,12 @@ handWritten =
   -- reachable only through `tcol` — which never splits. Without that escape
   -- route `"a.b"` would be unaddressable.
   , { name: "identifier-dot-not-split"
-    , query: select' [ expr (tcol "quo\"ted" "a.b") ] # from "quo\"ted"
+    , statement: SelectStmt $ select' [ expr (tcol "quo\"ted" "a.b") ] # from "quo\"ted"
     }
 
   -- A CTE names itself, so this one needs nothing from the schema.
   , { name: "identifier-cte-name"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "c\"te"
         # with_ "c\"te" (select' (cols [ "id" ]) # from "users")
     }
@@ -1412,7 +1413,7 @@ handWritten =
   -- The other half of the boundary: a value spelled as an attack is bound,
   -- and PostgreSQL sees a parameter rather than the SQL it reads as.
   , { name: "identifier-value-stays-bound"
-    , query: select' (cols [ "id" ])
+    , statement: SelectStmt $ select' (cols [ "id" ])
         # from "users"
         # where_ (col "name" .== str "'; DROP TABLE users; --")
     }
@@ -1422,40 +1423,35 @@ handWritten =
 -- INSERT corpus
 -- ---------------------------------------------------------------------------
 
-insertCorpus :: Array InsertEntry
-insertCorpus = insertHandWritten <> map asInsertEntry Cookbook.insertCookbook
-  where
-  asInsertEntry e = { name: "example-" <> e.name, insert: e.insert }
-
-insertHandWritten :: Array InsertEntry
+insertHandWritten :: Array CorpusEntry
 insertHandWritten =
   [ -- The INSERT path quotes its own table and column names rather than
     -- sharing the SELECT formatter's, so it gets an adversarial name of its
     -- own. See the identifier-quoting entries in `handWritten`.
     { name: "insert-quoted-identifiers"
-    , insert: insertInto "quo\"ted" [ "a\"b", "; DROP TABLE users; --" ]
+    , statement: InsertStmt $ insertInto "quo\"ted" [ "a\"b", "; DROP TABLE users; --" ]
         # values [ [ str "x", str "y" ] ]
     }
 
   , { name: "insert-values"
-    , insert: insertInto "users" ["name", "email"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email"]
         # values [[str "Alice", str "alice@example.com"]]
     }
 
   , { name: "insert-values-multi"
-    , insert: insertInto "users" ["name", "email"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email"]
         # values [ [str "Alice", str "a@example.com"]
                   , [str "Bob", str "b@example.com"]
                   ]
     }
 
   , { name: "insert-default"
-    , insert: insertInto "users" ["name", "email", "active"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email", "active"]
         # values [[str "Alice", str "alice@example.com", default_]]
     }
 
   , { name: "insert-from-select"
-    , insert: insertInto "orders" ["user_id", "status", "total"]
+    , statement: InsertStmt $ insertInto "orders" ["user_id", "status", "total"]
         # insertFrom
             ( select' (cols ["user_id"] <> [expr (str "pending"), expr (int 0)])
                 # from "orders"
@@ -1464,31 +1460,31 @@ insertHandWritten =
     }
 
   , { name: "insert-on-conflict-do-nothing"
-    , insert: insertInto "users" ["name", "email"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email"]
         # values [[str "Alice", str "alice@example.com"]]
         # onConflictDoNothing
     }
 
   , { name: "insert-on-conflict-do-update"
-    , insert: insertInto "users" ["name", "email"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email"]
         # values [[str "Alice", str "alice@example.com"]]
         # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
     }
 
   , { name: "insert-returning"
-    , insert: insertInto "users" ["name", "email"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email"]
         # values [[str "Alice", str "alice@example.com"]]
         # returning (cols ["id"])
     }
 
   , { name: "insert-returning-star"
-    , insert: insertInto "users" ["name", "email"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email"]
         # values [[str "Alice", str "alice@example.com"]]
         # returning [star]
     }
 
   , { name: "insert-upsert-returning"
-    , insert: insertInto "users" ["name", "email"]
+    , statement: InsertStmt $ insertInto "users" ["name", "email"]
         # values [[str "Alice", str "alice@example.com"]]
         # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
         # returning (cols ["id", "name"])
@@ -1499,27 +1495,22 @@ insertHandWritten =
 -- UPDATE corpus
 -- ---------------------------------------------------------------------------
 
-updateCorpus :: Array UpdateEntry
-updateCorpus = updateHandWritten <> map asUpdateEntry Cookbook.updateCookbook
-  where
-  asUpdateEntry e = { name: "example-" <> e.name, update: e.update }
-
-updateHandWritten :: Array UpdateEntry
+updateHandWritten :: Array CorpusEntry
 updateHandWritten =
   [ { name: "update-set"
-    , update: update "users"
+    , statement: UpdateStmt $ update "users"
         # set [Tuple "active" (bool false)]
         # updateWhere (col "id" .== int 1)
     }
 
   , { name: "update-set-multi"
-    , update: update "users"
+    , statement: UpdateStmt $ update "users"
         # set [Tuple "active" (bool false), Tuple "name" (str "Bob")]
         # updateWhere (col "id" .== int 1)
     }
 
   , { name: "update-from"
-    , update: update "users"
+    , statement: UpdateStmt $ update "users"
         # set [Tuple "active" (bool false)]
         # updateFrom "orders"
         # updateWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
@@ -1528,21 +1519,21 @@ updateHandWritten =
     }
 
   , { name: "update-returning"
-    , update: update "users"
+    , statement: UpdateStmt $ update "users"
         # set [Tuple "active" (bool false)]
         # updateWhere (col "id" .== int 1)
         # updateReturning (cols ["id", "active"])
     }
 
   , { name: "update-returning-star"
-    , update: update "users"
+    , statement: UpdateStmt $ update "users"
         # set [Tuple "active" (bool false)]
         # updateWhere (col "id" .== int 1)
         # updateReturning [star]
     }
 
   , { name: "update-full"
-    , update: update "users"
+    , statement: UpdateStmt $ update "users"
         # set [Tuple "active" (bool false), Tuple "name" (str "Bob")]
         # updateFrom "orders"
         # updateWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
@@ -1556,20 +1547,15 @@ updateHandWritten =
 -- DELETE corpus
 -- ---------------------------------------------------------------------------
 
-deleteCorpus :: Array DeleteEntry
-deleteCorpus = deleteHandWritten <> map asDeleteEntry Cookbook.deleteCookbook
-  where
-  asDeleteEntry e = { name: "example-" <> e.name, delete: e.delete }
-
-deleteHandWritten :: Array DeleteEntry
+deleteHandWritten :: Array CorpusEntry
 deleteHandWritten =
   [ { name: "delete-basic"
-    , delete: deleteFrom "orders"
+    , statement: DeleteStmt $ deleteFrom "orders"
         # deleteWhere (col "status" .== str "cancelled")
     }
 
   , { name: "delete-using"
-    , delete: deleteFrom "orders"
+    , statement: DeleteStmt $ deleteFrom "orders"
         # using ["users"]
         # deleteWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
                            , tcol "users" "active" .== bool false
@@ -1577,19 +1563,19 @@ deleteHandWritten =
     }
 
   , { name: "delete-returning"
-    , delete: deleteFrom "orders"
+    , statement: DeleteStmt $ deleteFrom "orders"
         # deleteWhere (col "id" .== int 1)
         # deleteReturning (cols ["id", "status"])
     }
 
   , { name: "delete-returning-star"
-    , delete: deleteFrom "orders"
+    , statement: DeleteStmt $ deleteFrom "orders"
         # deleteWhere (col "id" .== int 1)
         # deleteReturning [star]
     }
 
   , { name: "delete-full"
-    , delete: deleteFrom "orders"
+    , statement: DeleteStmt $ deleteFrom "orders"
         # using ["users"]
         # deleteWhere (and [ tcol "orders" "user_id" .== tcol "users" "id"
                            , tcol "users" "active" .== bool false
@@ -1855,12 +1841,15 @@ deleteTags (Delete d) =
 
 -- | Every feature tag the corpus actually exercises.
 coveredTags :: Array String
-coveredTags = Array.sort (Array.nub (queryCovers <> insertCovers <> updateCovers <> deleteCovers))
-  where
-  queryCovers = Array.concatMap (\e -> queryTags e.query) corpus
-  insertCovers = Array.concatMap (\e -> insertTags e.insert) insertCorpus
-  updateCovers = Array.concatMap (\e -> updateTags e.update) updateCorpus
-  deleteCovers = Array.concatMap (\e -> deleteTags e.delete) deleteCorpus
+coveredTags = Array.sort (Array.nub (Array.concatMap (statementTags <<< _.statement) corpus))
+
+-- | The tags of whichever statement an entry holds.
+statementTags :: Statement -> Array String
+statementTags = case _ of
+  SelectStmt q -> queryTags q
+  InsertStmt i -> insertTags i
+  UpdateStmt u -> updateTags u
+  DeleteStmt d -> deleteTags d
 
 -- | Every feature tag the corpus is required to exercise. Keep in sync with
 -- | `Sqld.Core` — a new constructor belongs here and in a corpus entry.
