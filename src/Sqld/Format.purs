@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..), fst)
-import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Update, Window, keyword)
+import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query(..), QueryFields, Relation(..), SelectExpr(..), SetOperation(..), Update(..), Window, keyword)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -155,7 +155,7 @@ bracketNegative s = if String.take 1 s == "-" then "(" <> s <> ")" else s
 -- ---------------------------------------------------------------------------
 
 formatQuery :: Layout -> Query -> WithBindings String
-formatQuery layout q state0 = Tuple sql s5
+formatQuery layout (Query q) state0 = Tuple sql s5
   where
   Tuple withSql    s1 = formatWith    layout q.with    state0
   Tuple bodySql    s2 = formatBody    layout q         s1
@@ -175,12 +175,12 @@ formatQuery layout q state0 = Tuple sql s5
 -- | `WITH`, `ORDER BY`, `LIMIT` and `OFFSET` sit outside the body, which is
 -- | what makes them apply to the combined result rather than to the last
 -- | operand.
-formatBody :: Layout -> Query -> WithBindings String
+formatBody :: Layout -> QueryFields -> WithBindings String
 formatBody layout q state = case q.setOp of
   Nothing -> formatSelectBody layout q state
   Just so -> formatSetOperation layout so state
 
-formatSelectBody :: Layout -> Query -> WithBindings String
+formatSelectBody :: Layout -> QueryFields -> WithBindings String
 formatSelectBody layout q state0 = Tuple sql s6
   where
   Tuple selectSql  s1 = formatSelect  layout q.distinct q.select state0
@@ -669,7 +669,7 @@ inlineInsertWith :: Layout -> Insert -> String
 inlineInsertWith layout i = fst (formatInsertSql layout i inlineBindings)
 
 formatInsertSql :: Layout -> Insert -> WithBindings String
-formatInsertSql layout i state0 = Tuple sql s3
+formatInsertSql layout (Insert i) state0 = Tuple sql s3
   where
   intro = "INSERT INTO " <> quoteIdent i.table
     <> " (" <> intercalate ", " (map quoteIdent i.columns) <> ")"
@@ -743,7 +743,7 @@ inlineUpdateWith :: Layout -> Update -> String
 inlineUpdateWith layout u = fst (formatUpdateSql layout u inlineBindings)
 
 formatUpdateSql :: Layout -> Update -> WithBindings String
-formatUpdateSql layout u state0 = Tuple sql s4
+formatUpdateSql layout (Update u) state0 = Tuple sql s4
   where
   intro = "UPDATE " <> quoteIdent u.table
 
@@ -789,7 +789,7 @@ inlineDeleteWith :: Layout -> Delete -> String
 inlineDeleteWith layout d = fst (formatDeleteSql layout d inlineBindings)
 
 formatDeleteSql :: Layout -> Delete -> WithBindings String
-formatDeleteSql layout d state0 = Tuple sql s3
+formatDeleteSql layout (Delete d) state0 = Tuple sql s3
   where
   intro = "DELETE FROM " <> quoteIdent d.table
 

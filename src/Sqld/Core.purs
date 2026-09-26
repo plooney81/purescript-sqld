@@ -2,6 +2,7 @@ module Sqld.Core where
 
 import Prelude
 import Data.Maybe (Maybe(..))
+import Data.Newtype (class Newtype)
 import Data.Tuple (Tuple)
 
 -- | The fixed SQL keyword a value renders as.
@@ -166,9 +167,10 @@ type OrderExpr = { expr :: Expr, dir :: OrderDir, nulls :: Maybe NullOrder }
 -- | The window a window function is evaluated over: the `(…)` of
 -- | `ROW_NUMBER() OVER (PARTITION BY "department" ORDER BY "age" DESC)`.
 -- |
--- | A record synonym rather than a `newtype`, unlike `Cte` and `SetOperation`.
--- | Those close a cycle between two synonyms, which PureScript rejects; this
--- | one runs back to `Expr`, and expansion stops at a `data` declaration.
+-- | A record synonym rather than a `newtype`, unlike `Cte`, `SetOperation` and
+-- | the statement types. Nothing here has to be wrapped: a window is only ever
+-- | reached through an `Expr`, never formatted on its own, so it needs no
+-- | instance of its own and record update reaches its fields directly.
 -- |
 -- | Every field is optional. `emptyWindow` emits `OVER ()`, which is valid and
 -- | means the whole result set is one partition, unordered and unframed.
@@ -229,9 +231,10 @@ type Frame =
 -- | One entry in a `WITH` clause: a named intermediate result set.
 -- |
 -- | A `newtype` around the record rather than a bare record synonym, because a
--- | CTE holds a `Query` and a `Query` holds CTEs — a synonym would be a
--- | recursive type synonym, which PureScript rejects. `Relation` breaks the
--- | same cycle the same way.
+-- | CTE holds a `Query` and a `Query` holds CTEs: two synonyms closing a cycle
+-- | is what PureScript rejects. `Query` is a `newtype` for a different reason —
+-- | it needs somewhere to hang an instance — and either one alone would be
+-- | enough to stop the expansion, so this one is now belt and braces.
 -- |
 -- | `columns` is the optional output column list, `WITH "t" ("a", "b") AS (…)`;
 -- | empty omits it.
@@ -264,8 +267,8 @@ instance Keyword SetOp where
 
 -- | Two result sets combined: `left UNION right`, and so on.
 -- |
--- | A `newtype` for the same reason as `Cte`: it closes a cycle through
--- | `Query`, which a record synonym cannot express.
+-- | A `newtype` for the same reason as `Cte`: it sits on a cycle through
+-- | `Query`, and a record synonym there would be a recursive synonym.
 -- |
 -- | Both operands are complete queries, and both are bracketed when emitted.
 -- | That makes a chain unambiguous whatever PostgreSQL's own precedence between
@@ -364,9 +367,18 @@ type Locking =
 
 -- | A `SELECT` statement.
 -- |
+-- | A `newtype` rather than a bare record synonym, so that a typeclass has
+-- | somewhere to attach an instance: PureScript gives none to a synonym, and
+-- | one `format` for every statement type is where this is going.
+-- | `QueryFields` names the record behind it, and the `Newtype` instance means
+-- | `Data.Newtype.over` reaches a field that the `Sqld.Select` builders do not
+-- | cover:
+-- |
+-- |     emptyQuery # over Query _ { limit = Just (int 5) }
+-- |
 -- | `setOp` is what makes a query a set operation rather than a single
--- | `SELECT`. When it is present the operands supply the rows, so this record's
--- | `distinct`, `select`, `from`, `joins`, `where_`, `groupBy` and `having` have
+-- | `SELECT`. When it is present the operands supply the rows, so `distinct`,
+-- | `select`, `from`, `joins`, `where_`, `groupBy` and `having` have
 -- | nothing to emit; `with`, `orderBy`, `limit` and `offset` still do, and apply
 -- | to the combined result. The `Sqld.Select` builders start such a query from
 -- | `emptyQuery`, so the unused fields stay empty — applying `select` or `from`
@@ -379,7 +391,11 @@ type Locking =
 -- | uses `DISTINCT`, `GROUP BY`, `HAVING`, a window function or a set
 -- | operation, since none of those return rows a lock could be placed on; that
 -- | is a rule it enforces itself rather than one this type expresses.
-type Query =
+newtype Query = Query QueryFields
+
+derive instance Newtype Query _
+
+type QueryFields =
   { with     :: Array Cte
   , setOp    :: Maybe SetOperation
   , distinct :: Maybe Distinct
@@ -396,7 +412,7 @@ type Query =
   }
 
 emptyQuery :: Query
-emptyQuery =
+emptyQuery = Query
   { with:     []
   , setOp:    Nothing
   , distinct: Nothing
@@ -437,7 +453,11 @@ data OnConflict
 -- | `INSERT … SELECT`. `onConflict` is PostgreSQL's upsert clause, and
 -- | `returning` projects columns from the inserted (or updated) rows back to
 -- | the caller, exactly as a `SELECT` list does.
-type Insert =
+newtype Insert = Insert InsertFields
+
+derive instance Newtype Insert _
+
+type InsertFields =
   { table      :: String
   , columns    :: Array String
   , source     :: InsertSource
@@ -446,7 +466,7 @@ type Insert =
   }
 
 emptyInsert :: String -> Array String -> Insert
-emptyInsert table columns =
+emptyInsert table columns = Insert
   { table
   , columns
   , source:     InsertValues []
@@ -472,7 +492,11 @@ emptyInsert table columns =
 -- | An `UPDATE` with no `WHERE` is valid SQL and updates every row. The API
 -- | does not prevent this — it is a deliberate statement, the same way
 -- | `SELECT * FROM "t"` without a `WHERE` is — and PostgreSQL will execute it.
-type Update =
+newtype Update = Update UpdateFields
+
+derive instance Newtype Update _
+
+type UpdateFields =
   { table     :: String
   , set       :: Array (Tuple String Expr)
   , from      :: Maybe String
@@ -481,7 +505,7 @@ type Update =
   }
 
 emptyUpdate :: String -> Update
-emptyUpdate table =
+emptyUpdate table = Update
   { table
   , set:       []
   , from:      Nothing
@@ -503,7 +527,11 @@ emptyUpdate table =
 -- | A `DELETE` with no `WHERE` is valid SQL and removes every row. The API
 -- | does not prevent this — it is a deliberate statement, the same way
 -- | `UPDATE` without a `WHERE` is — and PostgreSQL will execute it.
-type Delete =
+newtype Delete = Delete DeleteFields
+
+derive instance Newtype Delete _
+
+type DeleteFields =
   { table     :: String
   , using     :: Array String
   , where_    :: Maybe Expr
@@ -511,7 +539,7 @@ type Delete =
   }
 
 emptyDelete :: String -> Delete
-emptyDelete table =
+emptyDelete table = Delete
   { table
   , using:     []
   , where_:    Nothing

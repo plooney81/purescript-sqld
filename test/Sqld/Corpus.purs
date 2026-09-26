@@ -33,7 +33,7 @@ import Data.Array (concatMap, difference, length, nub, null, sort) as Array
 import Data.Maybe (Maybe(..), isJust, maybe)
 import Example.Cookbook (cookbook, deleteCookbook, insertCookbook, updateCookbook) as Cookbook
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, Window, emptyWindow)
+import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query(..), Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update(..), Window, emptyWindow)
 import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, default_, denseRank, eqAny, excluded, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, deleteFrom, deleteReturning, deleteWhere, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', set, skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, with_, withCte, withRecursive)
 
@@ -1797,7 +1797,7 @@ cteTags (Cte c) =
     <> queryTags c.query
 
 queryTags :: Query -> Array String
-queryTags q =
+queryTags (Query q) =
   Array.concatMap cteTags q.with
     <> foldClause "Query.setOp" (map setOperationTags q.setOp)
     <> (case q.distinct of
@@ -1821,7 +1821,7 @@ queryTags q =
   clause tag inner isEmpty = if isEmpty then [] else tag : inner
 
 insertTags :: Insert -> Array String
-insertTags i =
+insertTags (Insert i) =
   [ "Insert" ]
     <> sourceTags i.source
     <> onConflictTags i.onConflict
@@ -1839,7 +1839,7 @@ insertTags i =
       <> Array.concatMap (\(Tuple _ e) -> exprTags e) assignments
 
 updateTags :: Update -> Array String
-updateTags u =
+updateTags (Update u) =
   [ "Update" ]
     <> (if Array.null u.set then [] else "Update.set" : Array.concatMap (\(Tuple _ e) -> exprTags e) u.set)
     <> maybe [] (\_ -> [ "Update.from" ]) u.from
@@ -1847,7 +1847,7 @@ updateTags u =
     <> (if Array.null u.returning then [] else "Update.returning" : Array.concatMap selectTags u.returning)
 
 deleteTags :: Delete -> Array String
-deleteTags d =
+deleteTags (Delete d) =
   [ "Delete" ]
     <> (if Array.null d.using then [] else [ "Delete.using" ])
     <> maybe [] (\e -> "Delete.where" : exprTags e) d.where_

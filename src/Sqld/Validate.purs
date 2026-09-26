@@ -75,7 +75,7 @@ import Data.Maybe (Maybe(..))
 import Data.String as String
 import Data.String.CodeUnits (toCharArray, uncons) as CU
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), FormattedQuery, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Update)
+import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), FormattedQuery, GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), Locking, OnConflict(..), OrderExpr, Query(..), Relation(..), SelectExpr(..), SetOperation(..), Update(..))
 import Sqld.Format (format, formatDeleteStmt, formatInsert, formatUpdateStmt)
 
 -- ---------------------------------------------------------------------------
@@ -197,7 +197,7 @@ checked check emit x = case NEA.fromArray (check x) of
 
 -- | Every problem in a query, in the order the SQL emits them.
 validate :: Query -> Array FormatError
-validate q =
+validate (Query q) =
   foldMap cte q.with
     <> foldMap setOp q.setOp
     <> foldMap distinct q.distinct
@@ -213,7 +213,7 @@ validate q =
     <> foldMap locking q.locking
 
 validateInsert :: Insert -> Array FormatError
-validateInsert i =
+validateInsert (Insert i) =
   ident TableName i.table
     <> foldMap (ident ColumnName) i.columns
     <> insertSource i.source
@@ -221,7 +221,7 @@ validateInsert i =
     <> foldMap selectExpr i.returning
 
 validateUpdate :: Update -> Array FormatError
-validateUpdate u =
+validateUpdate (Update u) =
   ident TableName u.table
     <> foldMap assignment u.set
     <> foldMap (ident TableName) u.from
@@ -229,7 +229,7 @@ validateUpdate u =
     <> foldMap selectExpr u.returning
 
 validateDelete :: Delete -> Array FormatError
-validateDelete d =
+validateDelete (Delete d) =
   ident TableName d.table
     <> foldMap (ident TableName) d.using
     <> foldMap expr d.where_
