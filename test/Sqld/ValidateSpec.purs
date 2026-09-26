@@ -12,9 +12,11 @@ import Prelude
 import Data.Array (fromFoldable) as Array
 import Data.Either (Either(..))
 import Data.Foldable (for_)
+import Data.Tuple (Tuple(..))
+import Sqld.Core (Statement(..))
 import Sqld.Expr (app, col, int, str, tcol, (.==))
-import Sqld.Select (as, cols, from, select', where_, with_)
-import Sqld.Validate (FormatError(..), IdentRole(..), formatChecked, validFunctionName, validate, validateDelete, validateInsert, validateUpdate)
+import Sqld.Select (as, cols, deleteFrom, deleteWhere, from, insertInto, select', set, update, where_, with_)
+import Sqld.Validate (FormatError(..), IdentRole(..), formatChecked, validFunctionName, validate)
 import Test.Sqld.Corpus (corpus, deleteCorpus, insertCorpus, updateCorpus)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (fail, shouldEqual)
@@ -31,13 +33,13 @@ validateSpec = describe "Sqld.Validate" do
       validate entry.query `shouldEqual` []
 
     for_ insertCorpus \entry -> it entry.name do
-      validateInsert entry.insert `shouldEqual` []
+      validate entry.insert `shouldEqual` []
 
     for_ updateCorpus \entry -> it entry.name do
-      validateUpdate entry.update `shouldEqual` []
+      validate entry.update `shouldEqual` []
 
     for_ deleteCorpus \entry -> it entry.name do
-      validateDelete entry.delete `shouldEqual` []
+      validate entry.delete `shouldEqual` []
 
   -- The names the security work added are hostile to read and perfectly legal
   -- to run. A checker that rejected them would be reporting its own dislike of
@@ -58,6 +60,62 @@ validateSpec = describe "Sqld.Validate" do
             # from "users"
             # where_ (col "name" .== str "'; DROP TABLE users; --")
         ) `shouldEqual` []
+
+  -- The corpus sweep only ever asserts `[]`, and every case below it used to
+  -- take a `Query`, so nothing held the other three walks — or the dispatch
+  -- that reaches them — to reporting anything at all.
+  describe "the other statement types" do
+    it "rejects an empty INSERT target, bare and wrapped" do
+      validate (insertInto "" [ "a" ]) `shouldEqual` [ EmptyIdentifier TableName ]
+      validate (InsertStmt (insertInto "" [ "a" ])) `shouldEqual` [ EmptyIdentifier TableName ]
+
+    it "rejects an empty INSERT column, bare and wrapped" do
+      validate (insertInto "users" [ "" ]) `shouldEqual` [ EmptyIdentifier ColumnName ]
+      validate (InsertStmt (insertInto "users" [ "" ])) `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "rejects an empty UPDATE target, bare and wrapped" do
+      validate (update "") `shouldEqual` [ EmptyIdentifier TableName ]
+      validate (UpdateStmt (update "")) `shouldEqual` [ EmptyIdentifier TableName ]
+
+    it "rejects an empty DELETE target, bare and wrapped" do
+      validate (deleteFrom "") `shouldEqual` [ EmptyIdentifier TableName ]
+      validate (DeleteStmt (deleteFrom "")) `shouldEqual` [ EmptyIdentifier TableName ]
+
+    it "reaches inside an UPDATE, not just its table name" do
+      validate (update "orders" # set [ Tuple "status" (app "" [ col "id" ]) ])
+        `shouldEqual` [ BadFunctionName "" ]
+
+    it "reaches inside a DELETE, not just its table name" do
+      validate (deleteFrom "orders" # deleteWhere (col "" .== int 1))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "a SELECT wrapped in a Statement reports what the bare one does" do
+      validate (SelectStmt (select' (cols [ "" ]) # from "users"))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+  describe "formatChecked on every statement type" do
+    it "refuses an INSERT that names nothing" do
+      case formatChecked (insertInto "" [ "a" ]) of
+        Left errs -> Array.fromFoldable errs `shouldEqual` [ EmptyIdentifier TableName ]
+        Right _ -> fail "expected the empty table name to be rejected"
+
+    it "refuses an UPDATE that names nothing" do
+      case formatChecked (update "") of
+        Left errs -> Array.fromFoldable errs `shouldEqual` [ EmptyIdentifier TableName ]
+        Right _ -> fail "expected the empty table name to be rejected"
+
+    it "refuses a DELETE that names nothing" do
+      case formatChecked (deleteFrom "") of
+        Left errs -> Array.fromFoldable errs `shouldEqual` [ EmptyIdentifier TableName ]
+        Right _ -> fail "expected the empty table name to be rejected"
+
+    it "refuses a Statement that names nothing, and formats one that does" do
+      case formatChecked (DeleteStmt (deleteFrom "")) of
+        Left errs -> Array.fromFoldable errs `shouldEqual` [ EmptyIdentifier TableName ]
+        Right _ -> fail "expected the empty table name to be rejected"
+      case formatChecked (DeleteStmt (deleteFrom "orders")) of
+        Left _ -> fail "expected a well-formed DELETE to format"
+        Right { sql } -> sql `shouldEqual` "DELETE FROM \"orders\""
 
   describe "identifiers" do
     it "rejects an empty column name" do

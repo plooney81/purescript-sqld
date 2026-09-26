@@ -7,7 +7,7 @@ import Data.Maybe (Maybe(..), maybe)
 import Data.Monoid (power)
 import Data.String as String
 import Data.Tuple (Tuple(..), fst)
-import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query(..), QueryFields, Relation(..), SelectExpr(..), SetOperation(..), Update(..), Window, keyword)
+import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), FormattedQuery, Frame, GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), Literal(..), Locking, OnConflict(..), OrderExpr, Query(..), QueryFields, Relation(..), SelectExpr(..), SetOperation(..), Statement(..), Update(..), Window, keyword)
 
 -- ---------------------------------------------------------------------------
 -- State threading — pure, no Effect
@@ -82,32 +82,69 @@ parenthesise layout sql =
 -- Public entry points
 -- ---------------------------------------------------------------------------
 
+-- | Anything this library can turn into SQL.
+-- |
+-- | One member rather than one per layout, because the four statement
+-- | formatters already share a shape: each renders at a `Layout`, threading the
+-- | bindings through. `format`, `formatInline` and `formatPretty` are then
+-- | written once, over the class, and a new statement type costs one line here
+-- | rather than three entry points on the module.
+-- |
+-- | `renderWith` is the seam the three of them share; it is not the function to
+-- | reach for. Callers want one of those three.
+class Format a where
+  renderWith :: Layout -> a -> WithBindings String
+
+instance Format Query where
+  renderWith = formatQuery
+
+instance Format Insert where
+  renderWith = formatInsertSql
+
+instance Format Update where
+  renderWith = formatUpdateSql
+
+instance Format Delete where
+  renderWith = formatDeleteSql
+
+-- | A `Statement` emits exactly what the statement inside it emits.
+-- |
+-- | Each branch goes back through the class rather than calling the renderer
+-- | beneath it, so a statement type added to `Statement` without an instance of
+-- | its own does not compile.
+instance Format Statement where
+  renderWith layout = case _ of
+    SelectStmt q -> renderWith layout q
+    InsertStmt i -> renderWith layout i
+    UpdateStmt u -> renderWith layout u
+    DeleteStmt d -> renderWith layout d
+
 -- | The formatter to hand a driver: every literal becomes a numbered
 -- | placeholder and travels beside the SQL rather than inside it, so no value
 -- | can be read as SQL. Identifiers are quoted by `quoteIdent`. Operator,
 -- | function and type names, and anything given to `Sqld.Expr.raw`, are
 -- | emitted as written — see the security section of the README for the whole
 -- | boundary in one place.
-format :: Query -> FormattedQuery
-format q = { sql, params: state.params }
+format :: ∀ a. Format a => a -> FormattedQuery
+format x = { sql, params: state.params }
   where
-  Tuple sql state = formatQuery Inline q emptyBindings
+  Tuple sql state = renderWith Inline x emptyBindings
 
 -- | Inline all literals directly into the SQL string, single line.
 -- |
 -- | **Debugging and logging only.** The output is a string with the values
 -- | written into it: handing it to a driver gives up the one guarantee
 -- | `format` provides, so a single quote in a value is all that stands between
--- | the query and an injection. There is no version of this that is safe to
+-- | the statement and an injection. There is no version of this that is safe to
 -- | execute — use `format`.
-formatInline :: Query -> String
+formatInline :: ∀ a. Format a => a -> String
 formatInline = inlineWith Inline
 
 -- | Like `formatInline` but with each clause on its own line, and nested
 -- | subqueries indented one level per level of nesting. **Debugging and
 -- | logging only**, for the reason `formatInline` gives.
-formatPretty :: Query -> String
-formatPretty = inlineWith (Pretty 0)
+formatPretty :: ∀ a. Format a => a -> String
+formatPretty = inlineWith $ Pretty 0
 
 -- | Formats with the literals written in place rather than bound.
 -- |
@@ -116,8 +153,8 @@ formatPretty = inlineWith (Pretty 0)
 -- | obvious alternative and is wrong: each pass re-reads what the pass before
 -- | it wrote, so a string value — or a `raw` fragment — whose own text contains
 -- | `$1` would be rewritten again as though it were a placeholder.
-inlineWith :: Layout -> Query -> String
-inlineWith layout q = fst (formatQuery layout q inlineBindings)
+inlineWith :: ∀ a. Format a => Layout -> a -> String
+inlineWith layout x = fst $ renderWith layout x inlineBindings
 
 -- | A literal as SQL text, for the debugging formatters.
 -- |
@@ -651,23 +688,6 @@ quoteIdent ident =
 -- INSERT
 -- ---------------------------------------------------------------------------
 
-formatInsert :: Insert -> FormattedQuery
-formatInsert i = { sql, params: state.params }
-  where
-  Tuple sql state = formatInsertSql Inline i emptyBindings
-
--- | **Debugging and logging only**, for the reason `formatInline` gives.
-formatInsertInline :: Insert -> String
-formatInsertInline = inlineInsertWith Inline
-
--- | **Debugging and logging only**, for the reason `formatInline` gives.
-formatInsertPretty :: Insert -> String
-formatInsertPretty = inlineInsertWith (Pretty 0)
-
--- | As `inlineWith`, for an `Insert`.
-inlineInsertWith :: Layout -> Insert -> String
-inlineInsertWith layout i = fst (formatInsertSql layout i inlineBindings)
-
 formatInsertSql :: Layout -> Insert -> WithBindings String
 formatInsertSql layout (Insert i) state0 = Tuple sql s3
   where
@@ -725,23 +745,6 @@ formatReturning layout exprs state = Tuple ("RETURNING " <> intercalate ", " par
 -- UPDATE
 -- ---------------------------------------------------------------------------
 
-formatUpdateStmt :: Update -> FormattedQuery
-formatUpdateStmt u = { sql, params: state.params }
-  where
-  Tuple sql state = formatUpdateSql Inline u emptyBindings
-
--- | **Debugging and logging only**, for the reason `formatInline` gives.
-formatUpdateInline :: Update -> String
-formatUpdateInline = inlineUpdateWith Inline
-
--- | **Debugging and logging only**, for the reason `formatInline` gives.
-formatUpdatePretty :: Update -> String
-formatUpdatePretty = inlineUpdateWith (Pretty 0)
-
--- | As `inlineWith`, for an `Update`.
-inlineUpdateWith :: Layout -> Update -> String
-inlineUpdateWith layout u = fst (formatUpdateSql layout u inlineBindings)
-
 formatUpdateSql :: Layout -> Update -> WithBindings String
 formatUpdateSql layout (Update u) state0 = Tuple sql s4
   where
@@ -770,23 +773,6 @@ formatUpdateFrom _ (Just table) state = Tuple ("FROM " <> quoteIdent table) stat
 -- ---------------------------------------------------------------------------
 -- DELETE
 -- ---------------------------------------------------------------------------
-
-formatDeleteStmt :: Delete -> FormattedQuery
-formatDeleteStmt d = { sql, params: state.params }
-  where
-  Tuple sql state = formatDeleteSql Inline d emptyBindings
-
--- | **Debugging and logging only**, for the reason `formatInline` gives.
-formatDeleteInline :: Delete -> String
-formatDeleteInline = inlineDeleteWith Inline
-
--- | **Debugging and logging only**, for the reason `formatInline` gives.
-formatDeletePretty :: Delete -> String
-formatDeletePretty = inlineDeleteWith (Pretty 0)
-
--- | As `inlineWith`, for a `Delete`.
-inlineDeleteWith :: Layout -> Delete -> String
-inlineDeleteWith layout d = fst (formatDeleteSql layout d inlineBindings)
 
 formatDeleteSql :: Layout -> Delete -> WithBindings String
 formatDeleteSql layout (Delete d) state0 = Tuple sql s3

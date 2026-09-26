@@ -17,7 +17,7 @@ import Node.Encoding (Encoding(..))
 import Node.FS.Perms (permsAll)
 import Node.FS.Sync (mkdir', writeTextFile)
 import Example.Cookbook (DeleteExample, Example, InsertExample, UpdateExample, cookbook, deleteCookbook, insertCookbook, updateCookbook)
-import Sqld.Format (format, formatDeleteInline, formatDeletePretty, formatDeleteStmt, formatInline, formatInsert, formatInsertInline, formatInsertPretty, formatPretty, formatUpdateStmt, formatUpdateInline, formatUpdatePretty)
+import Sqld.Format (format, formatInline, formatPretty)
 import Test.Sqld.Corpus (CorpusEntry, DeleteEntry, InsertEntry, UpdateEntry, corpus, deleteCorpus, insertCorpus, updateCorpus)
 import Test.Sqld.Json (jsonString, literalJson)
 
@@ -69,10 +69,10 @@ insertExampleJson example =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"prettySql\": "
-    <> jsonString (formatInsertPretty example.insert)
+    <> jsonString (formatPretty example.insert)
     <> " }"
   where
-  formatted = formatInsert example.insert
+  formatted = format example.insert
 
 corpusJson :: String
 corpusJson = "[\n" <> intercalate ",\n" (map entryJson corpus <> map insertEntryJson insertCorpus <> map updateEntryJson updateCorpus <> map deleteEntryJson deleteCorpus) <> "\n]\n"
@@ -100,10 +100,10 @@ insertEntryJson entry =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"inlineSql\": "
-    <> jsonString (formatInsertInline entry.insert)
+    <> jsonString (formatInline entry.insert)
     <> " }"
   where
-  formatted = formatInsert entry.insert
+  formatted = format entry.insert
 
 updateExampleJson :: UpdateExample -> String
 updateExampleJson example =
@@ -114,10 +114,10 @@ updateExampleJson example =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"prettySql\": "
-    <> jsonString (formatUpdatePretty example.update)
+    <> jsonString (formatPretty example.update)
     <> " }"
   where
-  formatted = formatUpdateStmt example.update
+  formatted = format example.update
 
 deleteExampleJson :: DeleteExample -> String
 deleteExampleJson example =
@@ -128,10 +128,10 @@ deleteExampleJson example =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"prettySql\": "
-    <> jsonString (formatDeletePretty example.delete)
+    <> jsonString (formatPretty example.delete)
     <> " }"
   where
-  formatted = formatDeleteStmt example.delete
+  formatted = format example.delete
 
 updateEntryJson :: UpdateEntry -> String
 updateEntryJson entry =
@@ -142,10 +142,10 @@ updateEntryJson entry =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"inlineSql\": "
-    <> jsonString (formatUpdateInline entry.update)
+    <> jsonString (formatInline entry.update)
     <> " }"
   where
-  formatted = formatUpdateStmt entry.update
+  formatted = format entry.update
 
 deleteEntryJson :: DeleteEntry -> String
 deleteEntryJson entry =
@@ -156,7 +156,7 @@ deleteEntryJson entry =
     <> intercalate ", " (map literalJson formatted.params)
     <> "]"
     <> ", \"inlineSql\": "
-    <> jsonString (formatDeleteInline entry.delete)
+    <> jsonString (formatInline entry.delete)
     <> " }"
   where
-  formatted = formatDeleteStmt entry.delete
+  formatted = format entry.delete

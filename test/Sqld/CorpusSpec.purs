@@ -5,7 +5,7 @@ import Prelude
 import Data.Array (length, nub) as Array
 import Data.Foldable (for_)
 import Data.String as String
-import Sqld.Format (format, formatDeleteInline, formatDeleteStmt, formatInline, formatInsert, formatInsertInline, formatUpdateStmt, formatUpdateInline)
+import Sqld.Format (format, formatInline)
 import Test.Sqld.Corpus (corpus, deleteCorpus, insertCorpus, updateCorpus, missingTags)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual, shouldNotEqual)
@@ -41,29 +41,29 @@ corpusSpec = describe "Sqld.Corpus" do
   describe "insert well-formedness" do
     for_ insertCorpus \entry -> it entry.name do
       let
-        formatted = formatInsert entry.insert
+        formatted = format entry.insert
         placeholders = Array.length (String.split (String.Pattern "$") formatted.sql) - 1
 
       formatted.sql `shouldNotEqual` ""
-      formatInsertInline entry.insert `shouldNotEqual` ""
+      formatInline entry.insert `shouldNotEqual` ""
       placeholders `shouldEqual` Array.length formatted.params
 
   describe "update well-formedness" do
     for_ updateCorpus \entry -> it entry.name do
       let
-        formatted = formatUpdateStmt entry.update
+        formatted = format entry.update
         placeholders = Array.length (String.split (String.Pattern "$") formatted.sql) - 1
 
       formatted.sql `shouldNotEqual` ""
-      formatUpdateInline entry.update `shouldNotEqual` ""
+      formatInline entry.update `shouldNotEqual` ""
       placeholders `shouldEqual` Array.length formatted.params
 
   describe "delete well-formedness" do
     for_ deleteCorpus \entry -> it entry.name do
       let
-        formatted = formatDeleteStmt entry.delete
+        formatted = format entry.delete
         placeholders = Array.length (String.split (String.Pattern "$") formatted.sql) - 1
 
       formatted.sql `shouldNotEqual` ""
-      formatDeleteInline entry.delete `shouldNotEqual` ""
+      formatInline entry.delete `shouldNotEqual` ""
       placeholders `shouldEqual` Array.length formatted.params

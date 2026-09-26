@@ -4,7 +4,7 @@ import Prelude (Unit, discard, (#))
 import Data.Tuple (Tuple(..))
 import Sqld.Core (Literal(..))
 import Sqld.Expr (bool, col, int, str, tcol, (.==), (.>))
-import Sqld.Format (formatUpdateStmt, formatUpdateInline)
+import Sqld.Format (format, formatInline)
 import Sqld.Select (as, cols, set, star, update, updateFrom, updateReturning, updateWhere)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -17,7 +17,7 @@ updateSpec = describe "UPDATE" do
       let sql = update "users"
             # set [Tuple "active" (bool false)]
             # updateWhere (col "id" .== int 1)
-            # formatUpdateInline
+            # formatInline
       sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = FALSE WHERE \"id\" = 1"
 
@@ -25,7 +25,7 @@ updateSpec = describe "UPDATE" do
       let sql = update "users"
             # set [Tuple "active" (bool false), Tuple "name" (str "Bob")]
             # updateWhere (col "id" .== int 1)
-            # formatUpdateInline
+            # formatInline
       sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = FALSE, \"name\" = 'Bob' WHERE \"id\" = 1"
 
@@ -33,7 +33,7 @@ updateSpec = describe "UPDATE" do
       let fq = update "users"
             # set [Tuple "active" (bool false), Tuple "name" (str "Bob")]
             # updateWhere (col "id" .== int 1)
-            # formatUpdateStmt
+            # format
       fq.sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = $1, \"name\" = $2 WHERE \"id\" = $3"
       fq.params `shouldEqual` [LitBoolean false, LitString "Bob", LitInt 1]
@@ -44,7 +44,7 @@ updateSpec = describe "UPDATE" do
             # set [Tuple "active" (bool false)]
             # updateFrom "orders"
             # updateWhere (tcol "orders" "user_id" .== tcol "users" "id")
-            # formatUpdateInline
+            # formatInline
       sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = FALSE FROM \"orders\" WHERE \"orders\".\"user_id\" = \"users\".\"id\""
 
@@ -52,7 +52,7 @@ updateSpec = describe "UPDATE" do
     it "updates every row" do
       let sql = update "users"
             # set [Tuple "active" (bool true)]
-            # formatUpdateInline
+            # formatInline
       sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = TRUE"
 
@@ -62,7 +62,7 @@ updateSpec = describe "UPDATE" do
             # set [Tuple "active" (bool false)]
             # updateWhere (col "id" .== int 1)
             # updateReturning (cols ["id", "active"])
-            # formatUpdateInline
+            # formatInline
       sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = FALSE WHERE \"id\" = 1 RETURNING \"id\", \"active\""
 
@@ -71,7 +71,7 @@ updateSpec = describe "UPDATE" do
             # set [Tuple "active" (bool false)]
             # updateWhere (col "id" .== int 1)
             # updateReturning [star]
-            # formatUpdateInline
+            # formatInline
       sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = FALSE WHERE \"id\" = 1 RETURNING *"
 
@@ -80,7 +80,7 @@ updateSpec = describe "UPDATE" do
             # set [Tuple "active" (bool false)]
             # updateWhere (col "id" .== int 1)
             # updateReturning [as (col "id") "updated_id"]
-            # formatUpdateInline
+            # formatInline
       sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = FALSE WHERE \"id\" = 1 RETURNING \"id\" AS \"updated_id\""
 
@@ -92,7 +92,7 @@ updateSpec = describe "UPDATE" do
             # updateWhere (tcol "orders" "user_id" .== tcol "users" "id")
             # updateWhere (tcol "orders" "total" .> int 100)
             # updateReturning (cols ["id"])
-            # formatUpdateStmt
+            # format
       fq.sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = $1, \"name\" = $2 FROM \"orders\" WHERE (\"orders\".\"user_id\" = \"users\".\"id\" AND \"orders\".\"total\" > $3) RETURNING \"id\""
       fq.params `shouldEqual` [LitBoolean false, LitString "Bob", LitInt 100]
@@ -105,7 +105,7 @@ updateSpec = describe "UPDATE" do
             # updateWhere (tcol "orders" "user_id" .== tcol "users" "id")
             # updateWhere (tcol "orders" "status" .== str "cancelled")
             # updateReturning (cols ["users.id"])
-            # formatUpdateStmt
+            # format
       fq.sql `shouldEqual`
         "UPDATE \"users\" SET \"active\" = $1, \"name\" = $2 FROM \"orders\" WHERE (\"orders\".\"user_id\" = \"users\".\"id\" AND \"orders\".\"status\" = $3) RETURNING \"users\".\"id\""
       fq.params `shouldEqual` [LitBoolean false, LitString "Bob", LitString "cancelled"]

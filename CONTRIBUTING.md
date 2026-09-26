@@ -63,6 +63,15 @@ they are monomorphic that is a type error rather than a warning. This flag
 extends the same idea to everything the compiler would otherwise only mention
 in passing, which is the class that accumulates across refactors.
 
+Adding a statement type works the same way, once you have taken the first step.
+Nothing forces you to take it: a statement type that never joins the `Statement`
+sum in `Sqld.Core` compiles perfectly well on its own. Add the constructor,
+though, and the rest follows — the `Format` and `Validate` instances for
+`Statement` and `statementTags` in the corpus are exhaustive `case` expressions
+over it, so each is a compile error until it has a branch, and each branch then
+demands the per-type instance, because those instances dispatch back through the
+class rather than calling the renderer underneath it.
+
 Fix the warning rather than working around it. If one genuinely has to be
 tolerated, `censorProjectWarnings` in `spago.yaml` is the escape hatch — record
 why in a comment beside it. Nothing is censored today.
@@ -181,10 +190,10 @@ CI runs the same steps against PostgreSQL 16 on every push and pull request.
 
 ## Scope
 
-`sqld` is PostgreSQL-only and currently SELECT-only, on purpose. Proposals for
-other dialects will likely be declined; proposals for other statement types
-(INSERT, UPDATE, DELETE) are interesting — please open an issue to discuss the
-shape before writing much code.
+`sqld` is PostgreSQL-only, on purpose, and covers `SELECT`, `INSERT`, `UPDATE`
+and `DELETE`. Proposals for other dialects will likely be declined; proposals
+for further statement types are interesting — please open an issue to discuss
+the shape before writing much code.
 
 `raw` exists as the escape hatch for anything the builders do not cover. If you
 find yourself reaching for it often for the same construct, that is a good issue

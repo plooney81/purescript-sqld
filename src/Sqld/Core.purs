@@ -367,12 +367,12 @@ type Locking =
 
 -- | A `SELECT` statement.
 -- |
--- | A `newtype` rather than a bare record synonym, so that a typeclass has
--- | somewhere to attach an instance: PureScript gives none to a synonym, and
--- | one `format` for every statement type is where this is going.
--- | `QueryFields` names the record behind it, and the `Newtype` instance means
--- | `Data.Newtype.over` reaches a field that the `Sqld.Select` builders do not
--- | cover:
+-- | A `newtype` rather than a bare record synonym, so `Sqld.Format.Format` and
+-- | `Sqld.Validate.Validate` have a type to attach an instance to — PureScript
+-- | gives no instance to a synonym, and one `format` for every statement type
+-- | is the whole point. `QueryFields` names the record behind it, and the
+-- | `Newtype` instance means `Data.Newtype.over` reaches a field that the
+-- | `Sqld.Select` builders do not cover:
 -- |
 -- |     emptyQuery # over Query _ { limit = Just (int 5) }
 -- |
@@ -545,6 +545,26 @@ emptyDelete table = Delete
   , where_:    Nothing
   , returning: []
   }
+
+-- ---------------------------------------------------------------------------
+-- Any statement
+-- ---------------------------------------------------------------------------
+
+-- | A statement of whichever kind, for holding the four together.
+-- |
+-- | `Sqld.Format.Format` and `Sqld.Validate.Validate` both have an instance, so
+-- | a `Statement` formats and validates exactly as the statement inside it
+-- | does. That is what a list of mixed statements needs — a migration, a batch,
+-- | or this library's own validation corpus, which is one array of these rather
+-- | than four arrays of one kind each.
+-- |
+-- | It emits no SQL of its own: every constructor defers to the statement it
+-- | wraps.
+data Statement
+  = SelectStmt Query
+  | InsertStmt Insert
+  | UpdateStmt Update
+  | DeleteStmt Delete
 
 type FormattedQuery =
   { sql    :: String

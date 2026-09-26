@@ -13,7 +13,7 @@ import Data.Foldable (for_)
 import Effect (Effect)
 import Effect.Console (log)
 import Example.Cookbook (cookbook, deleteCookbook)
-import Sqld.Format (formatDeletePretty, formatPretty)
+import Sqld.Format (formatPretty)
 
 main :: Effect Unit
 main = do
@@ -23,5 +23,5 @@ main = do
     log ""
   for_ deleteCookbook \example -> do
     log ("-- " <> example.name)
-    log (formatDeletePretty example.delete)
+    log (formatPretty example.delete)
     log ""
