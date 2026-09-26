@@ -260,6 +260,77 @@ between :: Expr -> Expr -> Expr -> Expr
 between = Between
 
 -- ---------------------------------------------------------------------------
+-- JSON
+-- ---------------------------------------------------------------------------
+--
+-- A thin layer over PostgreSQL's `jsonb` operators — every one is a one-line
+-- `BinOp`, and any operator is reachable with `binOp` whether or not it is
+-- listed here.
+--
+-- Unlike `binOp`, these are safe for any input: they take no operator string
+-- from the caller, so the only operators they can emit are the seven written
+-- below. That is the substitution the security section of the README asks for,
+-- made once here rather than in each caller.
+--
+-- Which type the right operand binds as differs between them, and PostgreSQL
+-- decides it rather than this library. `jsonGet`, `jsonGetText`, `jsonHasKey`
+-- and `jsonDelete` bind `text`; `jsonContains`, `jsonContainedBy` and
+-- `jsonConcat` bind `jsonb`, so those three want a whole JSON document on the
+-- right, not a key.
+--
+-- A key that is not text needs a cast, and nothing will tell you otherwise:
+-- `jsonGet doc (int 0)` binds `$1` as `text` and looks up the object key `"0"`,
+-- while `jsonGet doc (cast (int 0) "integer")` indexes into an array. Both are
+-- valid SQL. Note also that the two differ between `format` and `formatInline`
+-- — an inlined `0` is typed `integer` where the bound `$1` is not — so for
+-- these operators the debug formatter can show a query that means something
+-- other than the one you will run.
+--
+-- The operators taking a `text[]` path — `#>`, `#>>`, `?|`, `?&`, `#-` — are
+-- not here: they need an array constructor the library does not yet have.
+
+-- | `"payload" -> 'user'` — the value at a key, as `jsonb`.
+jsonGet :: Expr -> Expr -> Expr
+jsonGet = BinOp "->"
+
+-- | `"payload" ->> 'email'` — the value at a key, as `text`.
+jsonGetText :: Expr -> Expr -> Expr
+jsonGetText = BinOp "->>"
+
+-- | `"payload" @> '{"paid": true}'` — does the left document contain the
+-- | right one?
+jsonContains :: Expr -> Expr -> Expr
+jsonContains = BinOp "@>"
+
+-- | `"payload" <@ '{…}'` — is the left document contained by the right one?
+jsonContainedBy :: Expr -> Expr -> Expr
+jsonContainedBy = BinOp "<@"
+
+-- | `"payload" ? 'email'` — PostgreSQL's `?` operator.
+-- |
+-- | Tests for a top-level key, an array element, or a top-level string value.
+-- | `jsonHasKey` is what it is usually reached for rather than the whole of
+-- | what it does.
+-- |
+-- | `format` is unaffected by the `?`: its placeholders are `$1`, `$2`, … and
+-- | `?` is only another operator character. Some drivers and query proxies do
+-- | treat `?` as a parameter marker of their own and will mangle it, though —
+-- | `app "jsonb_exists" [ doc, key ]` is the same operator as a function call.
+jsonHasKey :: Expr -> Expr -> Expr
+jsonHasKey = BinOp "?"
+
+-- | `"payload" || '{"seen": true}'` — the two documents merged.
+jsonConcat :: Expr -> Expr -> Expr
+jsonConcat = BinOp "||"
+
+-- | `"payload" - 'tmp'` — the document without that key.
+-- |
+-- | Binds `text`, so it removes a key. Removing an array element takes the same
+-- | cast `jsonGet` does: `jsonDelete doc (cast (int 0) "integer")`.
+jsonDelete :: Expr -> Expr -> Expr
+jsonDelete = BinOp "-"
+
+-- ---------------------------------------------------------------------------
 -- Common functions
 -- ---------------------------------------------------------------------------
 --
