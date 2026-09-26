@@ -194,7 +194,7 @@ Before opening a pull request:
 - [ ] new AST constructors have corpus entries
 - [ ] `CHANGELOG.md` updated under `[Unreleased]`
 
-CI runs the same steps against PostgreSQL 16 on every push and pull request.
+CI runs the same steps against PostgreSQL 17 on every push and pull request.
 
 ## Scope
 

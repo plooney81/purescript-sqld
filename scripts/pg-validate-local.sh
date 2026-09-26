@@ -9,13 +9,13 @@
 # to the validator. Prefer the Makefile targets: `make validate`, `make sql`.
 #
 #   SQLD_PG_PORT=55432   host port to bind
-#   SQLD_PG_IMAGE        Postgres image (default: postgres:16-alpine)
+#   SQLD_PG_IMAGE        Postgres image (default: postgres:17-alpine)
 #   SQLD_PG_STOP=1       remove the container when finished
 #   SQLD_SKIP_TEST=1     skip `spago test`, reuse the existing corpus
 
 set -euo pipefail
 
-IMAGE="${SQLD_PG_IMAGE:-postgres:16-alpine}"
+IMAGE="${SQLD_PG_IMAGE:-postgres:17-alpine}"
 PORT="${SQLD_PG_PORT:-55432}"
 NAME="sqld-pg-validate"
 DB="sqld_validate"
@@ -25,6 +25,15 @@ cd "$(dirname "$0")/.."
 if ! docker info >/dev/null 2>&1; then
   echo "pg-validate-local: docker is not running" >&2
   exit 1
+fi
+
+# A running container is reused by name, so a changed image — bumping the
+# default, or an SQLD_PG_IMAGE override — would otherwise be silently ignored
+# and the validation would report on the version it happened to find.
+running_image="$(docker inspect -f '{{.Config.Image}}' "$NAME" 2>/dev/null || true)"
+if [ -n "$running_image" ] && [ "$running_image" != "$IMAGE" ]; then
+  echo "pg-validate-local: container runs ${running_image}, wanted ${IMAGE} — recreating"
+  docker rm -f "$NAME" >/dev/null
 fi
 
 if [ -z "$(docker ps -q -f "name=^${NAME}$")" ]; then
