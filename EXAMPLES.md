@@ -33,6 +33,7 @@ Regenerate with `make examples`.
 - [DISTINCT](#distinct)
 - [DISTINCT ON](#distinct-on)
 - [Functions, casts and arbitrary operators](#functions-casts-and-arbitrary-operators)
+- [Reading fields out of a jsonb column](#reading-fields-out-of-a-jsonb-column)
 - [EXISTS](#exists)
 - [NOT EXISTS](#not-exists)
 - [IN (SELECT …)](#in-select)
@@ -570,6 +571,46 @@ WHERE ("age" + 1) * 2 > 40
 Bound parameters: `$1` = `1`, `$2` = `2`, `$3` = `40`
 
 <sub>Parameterised: <code>SELECT "name" || "department" AS "label", "id"::text AS "id_text" FROM "users" WHERE ("age" + $1) * $2 > $3</code></sub>
+
+---
+
+## Reading fields out of a jsonb column
+
+PostgreSQL's own JSON operators have named helpers, so the operator string is
+the library's rather than the caller's — `jsonGetText` is `->>` and cannot be
+anything else, where `binOp` would take whatever it was handed.
+
+The two used here bind their right operand differently, which is PostgreSQL's
+rule rather than this library's: `->>` takes a key, `@>` takes a whole
+document. Getting that backwards is a type error rather than a silent one.
+
+```purescript
+jsonFields :: Query
+jsonFields =
+  select'
+    [ expr (col "id")
+    , as (jsonGetText (col "payload") (str "email")) "email"
+    ]
+    # from "documents"
+    # where_
+        ( and
+            [ jsonContains (col "payload") (str "{\"status\": \"paid\"}")
+            , jsonHasKey (col "payload") (str "email")
+            ]
+        )
+    # orderBy [ asc (col "id") ]
+```
+
+```sql
+SELECT "id", "payload" ->> 'email' AS "email"
+FROM "documents"
+WHERE ("payload" @> '{"status": "paid"}' AND "payload" ? 'email')
+ORDER BY "id" ASC
+```
+
+Bound parameters: `$1` = `"email"`, `$2` = `"{\"status\": \"paid\"}"`, `$3` = `"email"`
+
+<sub>Parameterised: <code>SELECT "id", "payload" ->> $1 AS "email" FROM "documents" WHERE ("payload" @> $2 AND "payload" ? $3) ORDER BY "id" ASC</code></sub>
 
 ---
 
