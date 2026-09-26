@@ -42,12 +42,13 @@ import Data.Array as Array
 import Data.Array.NonEmpty as NEA
 import Data.Foldable (all, any)
 import Data.Int (toNumber)
+import Data.Newtype (over)
 import Data.Maybe (Maybe(..), fromMaybe, isNothing, maybe)
 import Data.String as String
 import Data.Traversable (traverse)
 import Data.Tuple (Tuple(..), fst, snd)
 import Random.LCG (Seed)
-import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, QuantOp(..), Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyQuery)
+import Sqld.Core (Cte(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OrderDir(..), OrderExpr, QuantOp(..), Query(..), Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Window, emptyQuery)
 import Sqld.Format (formatInline)
 import Test.QuickCheck.Gen (Gen, chooseInt, elements, evalGen, frequency, shuffle, uniform, vectorOf)
 import Test.Sqld.Fixture (Column, SqlType(..), Table, fixtureSchema, typeName)
@@ -365,7 +366,7 @@ genScalarSub outer fuel ty = do
   let inner = Array.snoc outer { alias: subAlias outer, columns: tbl.columns, plain: true }
   e <- genExpr inner (min fuel 1) ty
   predicate <- optional 0.6 (genExpr inner (min fuel 1) TyBool)
-  pure emptyQuery
+  pure $ emptyQuery # over Query _
     { select = [ SelectExpr e ]
     , from = Just (Table tbl.name (Just (subAlias outer)))
     , where_ = predicate
@@ -667,7 +668,7 @@ genSubSelect fuel outer alias = do
   items <- traverse (item scope) (Array.mapWithIndex Tuple tys)
   predicate <- optional 0.5 (genExpr scope (min fuel 1) TyBool)
   pure
-    { query: emptyQuery
+    { query: emptyQuery # over Query _
         { select = items
         , from = Just (Table tbl.name (Just innerAlias))
         , where_ = predicate
@@ -697,7 +698,7 @@ genSimple fuel = do
   locking <-
     if rels.lockable && not items.windowed && isNothing distinct then genLocking rels.scope
     else pure []
-  pure emptyQuery
+  pure $ emptyQuery # over Query _
     { select = items.items
     , from = Just rels.from
     , joins = rels.joins
@@ -817,7 +818,7 @@ genGrouped fuel = do
   having <- optional 0.4 (genAggPredicate aggs)
   ordering <- someOf 0 2 (keys <> map snd aggs) >>= traverse genOrderOf
   limit <- optional 0.2 (Lit <<< LitInt <$> chooseInt 1 100)
-  pure emptyQuery
+  pure $ emptyQuery # over Query _
     { select = map SelectExpr projected <> Array.mapWithIndex aggItem aggs
     , from = Just rels.from
     , joins = rels.joins
@@ -878,7 +879,7 @@ genSetOp fuel = do
   op <- pick Union [ Intersect, Except ]
   everything <- chance 0.5
   limit <- optional 0.3 (Lit <<< LitInt <$> chooseInt 1 100)
-  pure emptyQuery
+  pure $ emptyQuery # over Query _
     { setOp = Just (SetOperation { op, all: everything, left, right })
     , limit = limit
     }
@@ -888,7 +889,7 @@ genSetOp fuel = do
     let scope = [ { alias: "r0", columns: tbl.columns, plain: true } ]
     items <- traverse (genExpr scope (min fuel 2)) tys
     predicate <- optional 0.5 (genExpr scope (min fuel 1) TyBool)
-    pure emptyQuery
+    pure $ emptyQuery # over Query _
       { select = map SelectExpr items
       , from = Just (Table tbl.name (Just "r0"))
       , where_ = predicate
@@ -904,7 +905,7 @@ genWithCte fuel = do
   items <- genSelectItems fuel scope
   predicate <- optional 0.6 (genExpr scope (min fuel 1) TyBool)
   ordering <- listOfBetween 0 2 (genOrderExpr scope (min fuel 1))
-  pure emptyQuery
+  pure $ emptyQuery # over Query _
     { with =
         [ Cte
             { name: "c0"
@@ -932,23 +933,28 @@ genWithCte fuel = do
 -- | would look like a smaller counterexample while actually being a different
 -- | bug.
 shrinkQuery :: Query -> Array Query
-shrinkQuery q = case q.setOp of
+shrinkQuery query@(Query q) = case q.setOp of
   -- Each operand is a complete query, so trying them alone says which side of
   -- the operator the failure is on.
   Just (SetOperation s) -> [ s.left, s.right ]
   Nothing -> dropClauses <> dropJoin <> shortenSelect <> shrinkExprs
   where
+  -- Fields are read off `q` and every candidate is built from `query`, so each
+  -- of the dozen or so sites below comes back wrapped without repeating
+  -- `over Query`.
+  modify f = over Query f query
+
   dropClauses = Array.catMaybes
-    [ q.where_ $> q { where_ = Nothing }
-    , q.having $> q { having = Nothing }
-    , q.limit $> q { limit = Nothing }
-    , q.offset $> q { offset = Nothing }
+    [ q.where_ $> modify _ { where_ = Nothing }
+    , q.having $> modify _ { having = Nothing }
+    , q.limit $> modify _ { limit = Nothing }
+    , q.offset $> modify _ { offset = Nothing }
     -- `DISTINCT ON` fixes the leading ordering expressions, so the two go
     -- together or not at all.
-    , q.distinct $> q { distinct = Nothing, orderBy = [] }
-    , if Array.null q.locking then Nothing else Just q { locking = [] }
-    , if Array.null q.orderBy || isDistinctOn then Nothing else Just q { orderBy = [] }
-    , if Array.length q.groupBy <= 1 then Nothing else Just q { groupBy = Array.take 1 q.groupBy }
+    , q.distinct $> modify _ { distinct = Nothing, orderBy = [] }
+    , if Array.null q.locking then Nothing else Just (modify _ { locking = [] })
+    , if Array.null q.orderBy || isDistinctOn then Nothing else Just (modify _ { orderBy = [] })
+    , if Array.length q.groupBy <= 1 then Nothing else Just (modify _ { groupBy = Array.take 1 q.groupBy })
     ]
 
   isDistinctOn = case q.distinct of
@@ -957,25 +963,25 @@ shrinkQuery q = case q.setOp of
 
   -- A join can only go if nothing left behind still names it.
   dropJoin = case Array.unsnoc q.joins of
-    Just { init, last } | not (mentionsAlias (relationAlias last.relation) q { joins = init }) ->
-      [ q { joins = init } ]
+    Just { init, last } | not (mentionsAlias (relationAlias last.relation) (modify _ { joins = init })) ->
+      [ modify _ { joins = init } ]
     _ -> []
 
   -- Dropping a projection is safe unless `DISTINCT` requires the ordering
   -- expressions to be among them.
   shortenSelect =
     if Array.length q.select <= 1 || isJust' q.distinct then []
-    else map (\i -> q { select = dropAt i q.select }) (Array.range 0 (Array.length q.select - 1))
+    else map (\i -> modify _ { select = dropAt i q.select }) (Array.range 0 (Array.length q.select - 1))
 
   isJust' = maybe false (const true)
 
   shrinkExprs =
-    maybe [] (\e -> map (\e' -> q { where_ = Just e' }) (shrinkExpr e)) q.where_
-      <> maybe [] (\e -> map (\e' -> q { having = Just e' }) (shrinkExpr e)) q.having
+    maybe [] (\e -> map (\e' -> modify _ { where_ = Just e' }) (shrinkExpr e)) q.where_
+      <> maybe [] (\e -> map (\e' -> modify _ { having = Just e' }) (shrinkExpr e)) q.having
       <> Array.concat (Array.mapWithIndex selectAt q.select)
 
-  selectAt i (SelectExpr e) = map (\e' -> q { select = setAt i (SelectExpr e') q.select }) (shrinkExpr e)
-  selectAt i (SelectAs e a) = map (\e' -> q { select = setAt i (SelectAs e' a) q.select }) (shrinkExpr e)
+  selectAt i (SelectExpr e) = map (\e' -> modify _ { select = setAt i (SelectExpr e') q.select }) (shrinkExpr e)
+  selectAt i (SelectAs e a) = map (\e' -> modify _ { select = setAt i (SelectAs e' a) q.select }) (shrinkExpr e)
   selectAt _ _ = []
 
 -- | Type-preserving replacements for an expression: one of its children of the

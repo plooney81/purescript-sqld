@@ -2,9 +2,10 @@ module Sqld.Select where
 
 import Data.Array (length, modifyAt, null) as Array
 import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Newtype (over)
 import Prelude (identity, ($), (-), (<<<), (<>), map)
 import Data.Tuple (Tuple)
-import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), GroupingElement(..), Insert, InsertSource(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update, emptyDelete, emptyInsert, emptyQuery, emptyUpdate)
+import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), GroupingElement(..), Insert(..), InsertSource(..), JoinCondition(..), JoinType(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, Query(..), Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Update(..), emptyDelete, emptyInsert, emptyQuery, emptyUpdate)
 import Sqld.Expr (col, int, tcol)
 
 -- ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ lateral = Lateral
 -- ---------------------------------------------------------------------------
 
 fromRel :: Relation -> Query -> Query
-fromRel r q = q { from = Just r }
+fromRel r = over Query _ { from = Just r }
 
 from :: String -> Query -> Query
 from table = fromRel $ rel table
@@ -71,7 +72,7 @@ fromLateral sub alias = fromRel $ lateral sub alias
 -- ---------------------------------------------------------------------------
 
 select :: Array SelectExpr -> Query -> Query
-select items q = q { select = q.select <> items }
+select items = over Query \q -> q { select = q.select <> items }
 
 -- | Starts a query from its select list, so the common case need not name
 -- | `emptyQuery`:
@@ -89,7 +90,7 @@ select' items = select items emptyQuery
 -- | `distinct` and `distinctOn` share a field, because a `SELECT` is one or the
 -- | other and never both: whichever is applied last wins.
 distinct :: Query -> Query
-distinct q = q { distinct = Just Distinct }
+distinct = over Query _ { distinct = Just Distinct }
 
 -- | `SELECT DISTINCT ON (expr, …)` — PostgreSQL's own: the first row of each
 -- | group of the given expressions survives.
@@ -107,16 +108,16 @@ distinct q = q { distinct = Just Distinct }
 -- | something PostgreSQL parses, and an empty list arises naturally when the
 -- | expressions are driven by user input.
 distinctOn :: Array Expr -> Query -> Query
-distinctOn [] q = distinct q
-distinctOn keys q = q { distinct = Just $ DistinctOn keys }
+distinctOn [] = distinct
+distinctOn keys = over Query _ { distinct = Just $ DistinctOn keys }
 
 where_ :: Expr -> Query -> Query
-where_ e q = q { where_ = Just $ case q.where_ of
+where_ e = over Query \q -> q { where_ = Just $ case q.where_ of
   Nothing   -> e
   Just prev -> And [prev, e] }
 
 setWhere :: Expr -> Query -> Query
-setWhere e q = q { where_ = Just e }
+setWhere e = over Query _ { where_ = Just e }
 
 -- ---------------------------------------------------------------------------
 -- Common table expressions
@@ -141,7 +142,7 @@ withRecursive name body = withCte $ cteRecursive $ cte name body
 -- | build one in stages. CTEs append in call order, and a later one may
 -- | reference an earlier one.
 withCte :: Cte -> Query -> Query
-withCte c q = q { with = q.with <> [ c ] }
+withCte c = over Query \q -> q { with = q.with <> [ c ] }
 
 cte :: String -> Query -> Cte
 cte name query = Cte { name, columns: [], recursive: false, query }
@@ -200,7 +201,7 @@ exceptAll = combine Except true
 -- | `offset` add to a set operation.
 combine :: SetOp -> Boolean -> Query -> Query -> Query
 combine op all_ right left =
-  emptyQuery { setOp = Just $ SetOperation { op, all: all_, left, right } }
+  over Query _ { setOp = Just $ SetOperation { op, all: all_, left, right } } emptyQuery
 
 -- ---------------------------------------------------------------------------
 -- Joins
@@ -213,7 +214,7 @@ combine op all_ right left =
 -- |     emptyQuery # joinRel (relAs "departments" "d") Cross
 -- |     -- CROSS JOIN "departments" AS "d"
 joinRel :: Relation -> JoinCondition -> Query -> Query
-joinRel relation condition q =
+joinRel relation condition = over Query \q ->
   q { joins = q.joins <> [ { relation, condition } ] }
 
 -- | The general `ON` form. The named helpers below cover the common cases;
@@ -325,7 +326,7 @@ fullJoinAs table alias = joinOn FullJoin (relAs table alias)
 -- ---------------------------------------------------------------------------
 
 orderBy :: Array OrderExpr -> Query -> Query
-orderBy terms q = q { orderBy = terms }
+orderBy terms = over Query _ { orderBy = terms }
 
 -- | `GROUP BY expr, …` — one result row per distinct combination of the
 -- | expressions.
@@ -382,22 +383,22 @@ groupByRollup keys = groupByElements [ Rollup keys ]
 
 -- | The general form: any grouping elements, appended to the clause.
 groupByElements :: Array GroupingElement -> Query -> Query
-groupByElements elements q = q { groupBy = q.groupBy <> elements }
+groupByElements elements = over Query \q -> q { groupBy = q.groupBy <> elements }
 
 having :: Expr -> Query -> Query
-having e q = q { having = Just e }
+having e = over Query _ { having = Just e }
 
 limitExpr :: Expr -> Query -> Query
-limitExpr e q = q { limit = Just e }
+limitExpr e = over Query _ { limit = Just e }
 
 limit :: Int -> Query -> Query
 limit = limitExpr <<< int
 
 limitAll :: Query -> Query
-limitAll q = q { limit = Just (Raw "ALL") }
+limitAll = over Query _ { limit = Just (Raw "ALL") }
 
 offsetExpr :: Expr -> Query -> Query
-offsetExpr e q = q { offset = Just e }
+offsetExpr e = over Query _ { offset = Just e }
 
 offset :: Int -> Query -> Query
 offset = offsetExpr <<< int
@@ -450,7 +451,7 @@ forKeyShare = lockRows ForKeyShare
 -- | SHARE OF "u"` locks the order for writing and the user against change.
 -- | Record update replaces the list outright.
 lockRows :: LockStrength -> Query -> Query
-lockRows strength q =
+lockRows strength = over Query \q ->
   q { locking = q.locking <> [ { strength, tables: [], wait: Nothing } ] }
 
 -- | `FOR UPDATE OF "a", "b"` — restricts the clause to those `FROM` items
@@ -494,7 +495,7 @@ setWait wait = modifyLock _ { wait = Just wait }
 -- | what they permit, so guessing either would be guessing what the caller
 -- | meant to lock out.
 modifyLock :: (Locking -> Locking) -> Query -> Query
-modifyLock f q =
+modifyLock f = over Query \q ->
   q { locking = fromMaybe q.locking (Array.modifyAt (Array.length q.locking - 1) f q.locking) }
 
 -- ---------------------------------------------------------------------------
@@ -574,7 +575,7 @@ orderUsing op e = { expr: e, dir: OrderUsing op, nulls: Nothing }
 -- ---------------------------------------------------------------------------
 
 mergeQueries :: Query -> Query -> Query
-mergeQueries base override =
+mergeQueries (Query base) (Query override) = Query
   { with:     base.with <> override.with
   , setOp:    case override.setOp of
                 Nothing -> base.setOp
@@ -614,20 +615,20 @@ insertInto :: String -> Array String -> Insert
 insertInto = emptyInsert
 
 values :: Array (Array Expr) -> Insert -> Insert
-values rows i = i { source = InsertValues rows }
+values rows = over Insert _ { source = InsertValues rows }
 
 insertFrom :: Query -> Insert -> Insert
-insertFrom q i = i { source = InsertQuery q }
+insertFrom q = over Insert _ { source = InsertQuery q }
 
 onConflictDoNothing :: Insert -> Insert
-onConflictDoNothing i = i { onConflict = Just DoNothing }
+onConflictDoNothing = over Insert _ { onConflict = Just DoNothing }
 
 onConflictUpdate :: Array String -> Array (Tuple String Expr) -> Insert -> Insert
-onConflictUpdate targets assignments i =
-  i { onConflict = Just (DoUpdate targets assignments) }
+onConflictUpdate targets assignments =
+  over Insert _ { onConflict = Just (DoUpdate targets assignments) }
 
 returning :: Array SelectExpr -> Insert -> Insert
-returning items i = i { returning = items }
+returning items = over Insert _ { returning = items }
 
 -- ---------------------------------------------------------------------------
 -- UPDATE
@@ -637,18 +638,18 @@ update :: String -> Update
 update = emptyUpdate
 
 set :: Array (Tuple String Expr) -> Update -> Update
-set assignments u = u { set = assignments }
+set assignments = over Update _ { set = assignments }
 
 updateFrom :: String -> Update -> Update
-updateFrom table u = u { from = Just table }
+updateFrom table = over Update _ { from = Just table }
 
 updateWhere :: Expr -> Update -> Update
-updateWhere e u = u { where_ = Just $ case u.where_ of
+updateWhere e = over Update \u -> u { where_ = Just $ case u.where_ of
   Nothing   -> e
   Just prev -> And [prev, e] }
 
 updateReturning :: Array SelectExpr -> Update -> Update
-updateReturning items u = u { returning = items }
+updateReturning items = over Update _ { returning = items }
 
 -- ---------------------------------------------------------------------------
 -- DELETE
@@ -658,12 +659,12 @@ deleteFrom :: String -> Delete
 deleteFrom = emptyDelete
 
 using :: Array String -> Delete -> Delete
-using tables d = d { using = tables }
+using tables = over Delete _ { using = tables }
 
 deleteWhere :: Expr -> Delete -> Delete
-deleteWhere e d = d { where_ = Just $ case d.where_ of
+deleteWhere e = over Delete \d -> d { where_ = Just $ case d.where_ of
   Nothing   -> e
   Just prev -> And [prev, e] }
 
 deleteReturning :: Array SelectExpr -> Delete -> Delete
-deleteReturning items d = d { returning = items }
+deleteReturning items = over Delete _ { returning = items }

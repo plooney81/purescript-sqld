@@ -10,6 +10,7 @@
             "effect",
             "foldable-traversable",
             "maybe",
+            "newtype",
             "prelude",
             "strings",
             "tuples"

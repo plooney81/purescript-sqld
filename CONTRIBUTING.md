@@ -63,6 +63,23 @@ they are monomorphic that is a type error rather than a warning. This flag
 extends the same idea to everything the compiler would otherwise only mention
 in passing, which is the class that accumulates across refactors.
 
+Adding a statement type is only partly enforced, so it is worth knowing which
+part. Nothing obliges you to add a `Statement` constructor in the first place —
+a statement type that never joins the sum compiles perfectly well alone. Add
+one, and the compiler then demands exactly three things, because the `Format`
+and `Validate` instances for `Statement` and `statementTags` in the corpus are
+exhaustive `case` expressions over it: a **branch** in each. It does not demand
+anything about what those branches contain. A branch calling `formatInsertSql`
+or `insertErrors` directly compiles without a `Format` or `Validate` instance
+for the new type at all, and `statementTags` calls the per-type taggers
+directly by design.
+
+So write each branch through the class — `InsertStmt i -> renderWith layout i`,
+not `InsertStmt i -> formatInsertSql layout i`. That is a convention the
+existing branches follow rather than a rule the compiler imposes, and it is what
+makes the per-type instance a compile error rather than an omission nobody
+notices.
+
 Fix the warning rather than working around it. If one genuinely has to be
 tolerated, `censorProjectWarnings` in `spago.yaml` is the escape hatch — record
 why in a comment beside it. Nothing is censored today.
@@ -181,10 +198,10 @@ CI runs the same steps against PostgreSQL 16 on every push and pull request.
 
 ## Scope
 
-`sqld` is PostgreSQL-only and currently SELECT-only, on purpose. Proposals for
-other dialects will likely be declined; proposals for other statement types
-(INSERT, UPDATE, DELETE) are interesting — please open an issue to discuss the
-shape before writing much code.
+`sqld` is PostgreSQL-only, on purpose, and covers `SELECT`, `INSERT`, `UPDATE`
+and `DELETE`. Proposals for other dialects will likely be declined; proposals
+for further statement types are interesting — please open an issue to discuss
+the shape before writing much code.
 
 `raw` exists as the escape hatch for anything the builders do not cover. If you
 find yourself reaching for it often for the same construct, that is a good issue

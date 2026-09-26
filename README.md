@@ -77,11 +77,11 @@ would reject, fails CI. Run them yourself with `spago run`.
 
 | Module | Contents |
 |---|---|
-| `Sqld.Core` | Core types: `Query`, `Expr`, `Insert`, `Update`, `Delete`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `InsertSource`, `OnConflict`, `emptyQuery`, `emptyInsert`, `emptyUpdate`, `emptyDelete`, `emptyWindow`, `Keyword` |
+| `Sqld.Core` | Core types: `Query`, `Expr`, `Insert`, `Update`, `Delete`, `Statement`, `Literal`, `SelectExpr`, `Distinct`, `GroupingElement`, `Cte`, `SetOperation`, `Window`, `Locking`, `JoinType`, `JoinCondition`, `InsertSource`, `OnConflict`, `emptyQuery`, `emptyInsert`, `emptyUpdate`, `emptyDelete`, `emptyWindow`, `Keyword` |
 | `Sqld.Expr` | Expression helpers over the generic AST nodes — operators, literals, functions, subqueries, `default_`, `excluded` |
 | `Sqld.Select` | SELECT query builders, INSERT builders, UPDATE builders, DELETE builders, and select-list helpers |
-| `Sqld.Format` | `format`, `formatInline`, `formatPretty`, `formatInsert`, `formatInsertInline`, `formatInsertPretty`, `formatUpdateStmt`, `formatUpdateInline`, `formatUpdatePretty`, `formatDeleteStmt`, `formatDeleteInline`, `formatDeletePretty` |
-| `Sqld.Validate` | Opt-in checking: `validate`, `formatChecked` and their `INSERT` / `UPDATE` / `DELETE` counterparts, `FormatError`, `validIdentifier`, `validFunctionName` |
+| `Sqld.Format` | `class Format` and its three entry points — `format`, `formatInline`, `formatPretty` — each working on any statement type |
+| `Sqld.Validate` | Opt-in checking: `class Validate`, `validate`, `formatChecked`, `FormatError`, `validIdentifier`, `validFunctionName` |
 
 ## API
 
@@ -716,19 +716,19 @@ types express.
 ### INSERT
 
 Start with `insertInto` and pipe through the INSERT helpers from `Sqld.Select`.
-`formatInsert` produces a parameterised `FormattedQuery`, the same type `format`
-returns for SELECT queries:
+`format` produces a parameterised `FormattedQuery`, exactly as it does for a
+SELECT query — one name for every statement type:
 
 ```purescript
 import Data.Tuple (Tuple(..))
 import Sqld.Expr (excluded, str)
-import Sqld.Format (formatInsert, formatInsertInline)
+import Sqld.Format (format)
 import Sqld.Select (cols, insertInto, onConflictUpdate, returning, values)
 
 -- INSERT INTO "users" ("name", "email") VALUES ($1, $2)
 --   ON CONFLICT ("email") DO UPDATE SET "name" = "excluded"."name"
 --   RETURNING "id", "name"
-fq = formatInsert $
+fq = format $
   insertInto "users" ["name", "email"]
     # values [[str "Alice", str "alice@example.com"]]
     # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
@@ -755,31 +755,26 @@ Two expression helpers support INSERT specifically:
 references the value the INSERT proposed, inside an `ON CONFLICT DO UPDATE SET`
 assignment.
 
-Formatting mirrors the SELECT API:
-
-| Function | Description |
-|---|---|
-| `formatInsert :: Insert -> FormattedQuery` | Parameterised (for drivers) |
-| `formatInsertInline :: Insert -> String` | Debug only — literals inlined |
-| `formatInsertPretty :: Insert -> String` | Debug only — multi-line |
+Formatting is the same three functions as everywhere else — see
+[Formatting](#formatting).
 
 ### UPDATE
 
 Start with `update` and pipe through the UPDATE helpers from `Sqld.Select`.
-`formatUpdateStmt` produces a parameterised `FormattedQuery`, the same type
-`format` returns for SELECT queries:
+`format` produces a parameterised `FormattedQuery`, as it does for every other
+statement type:
 
 ```purescript
 import Data.Tuple (Tuple(..))
 import Sqld.Expr (col, int, str, (.==))
-import Sqld.Format (formatUpdateStmt)
+import Sqld.Format (format)
 import Sqld.Select (cols, set, update, updateFrom, updateReturning, updateWhere)
 
 -- UPDATE "orders" SET "status" = $1, "total" = $2
 --   FROM "users"
 --   WHERE "orders"."user_id" = "users"."id" AND "users"."name" = $3
 --   RETURNING "orders"."id", "orders"."status"
-fq = formatUpdateStmt $
+fq = format $
   update "orders"
     # set [Tuple "status" (str "shipped"), Tuple "total" (int 100)]
     # updateFrom "users"
@@ -798,29 +793,24 @@ fq = formatUpdateStmt $
 
 Parameters are numbered left to right: SET values first, then WHERE.
 
-Formatting mirrors the SELECT and INSERT APIs:
-
-| Function | Description |
-|---|---|
-| `formatUpdateStmt :: Update -> FormattedQuery` | Parameterised (for drivers) |
-| `formatUpdateInline :: Update -> String` | Debug only — literals inlined |
-| `formatUpdatePretty :: Update -> String` | Debug only — multi-line |
+Formatting is the same three functions as everywhere else — see
+[Formatting](#formatting).
 
 ### DELETE
 
 Start with `deleteFrom` and pipe through the DELETE helpers from `Sqld.Select`.
-`formatDeleteStmt` produces a parameterised `FormattedQuery`, the same type
-`format` returns for SELECT queries:
+`format` produces a parameterised `FormattedQuery`, as it does for every other
+statement type:
 
 ```purescript
 import Sqld.Expr (and, bool, col, (.==))
-import Sqld.Format (formatDeleteStmt)
+import Sqld.Format (format)
 import Sqld.Select (cols, deleteFrom, deleteReturning, deleteWhere, using)
 
 -- DELETE FROM "orders" USING "users"
 --   WHERE "orders"."user_id" = "users"."id" AND "users"."active" = $1
 --   RETURNING "orders"."id"
-fq = formatDeleteStmt $
+fq = format $
   deleteFrom "orders"
     # using [ "users" ]
     # deleteWhere (and [ col "orders.user_id" .== col "users.id"
@@ -838,26 +828,36 @@ fq = formatDeleteStmt $
 
 Parameters are numbered left to right: WHERE, then RETURNING.
 
-Formatting mirrors the SELECT, INSERT and UPDATE APIs:
-
-| Function | Description |
-|---|---|
-| `formatDeleteStmt :: Delete -> FormattedQuery` | Parameterised (for drivers) |
-| `formatDeleteInline :: Delete -> String` | Debug only — literals inlined |
-| `formatDeletePretty :: Delete -> String` | Debug only — multi-line |
+Formatting is the same three functions as everywhere else — see
+[Formatting](#formatting).
 
 ### Formatting
 
-```purescript
--- Parameterised — use this when passing to a driver
-format :: Query -> { sql :: String, params :: Array Literal }
+Three functions, and each works on any statement — a `Query`, an `Insert`, an
+`Update`, a `Delete`, or a `Statement` holding whichever of them. That is what
+the `Format` class buys: the compiler picks the implementation, so there is one
+name per layout rather than one per layout per statement type.
 
--- Inlined — use this for logging and debugging only, never for user input
-formatInline :: Query -> String
+```purescript
+class Format a
+
+-- Parameterised — use this when passing to a driver
+format :: ∀ a. Format a => a -> { sql :: String, params :: Array Literal }
+
+-- Inlined — use these for logging and debugging only, never for user input
+formatInline :: ∀ a. Format a => a -> String
+formatPretty :: ∀ a. Format a => a -> String
 ```
 
 `format` is the only one of these that is safe to execute; see
 [Security](#security).
+
+`Statement` is the sum of the four — `SelectStmt`, `InsertStmt`, `UpdateStmt`,
+`DeleteStmt` — for when a list has to hold more than one kind:
+
+```purescript
+map format [ SelectStmt someQuery, InsertStmt someInsert ]
+```
 
 ## Composing fragments
 
@@ -1002,9 +1002,8 @@ PostgreSQL cares about.
 
 ### The debug formatters
 
-`formatInline`, `formatPretty` and their `INSERT` / `UPDATE` / `DELETE`
-counterparts write the values into the string itself. They exist for logs and
-for reading; handing one to a driver gives up the guarantee `format` provides,
+`formatInline` and `formatPretty` write the values into the string itself.
+They exist for logs and for reading; handing one to a driver gives up the guarantee `format` provides,
 and a single quote in a value is then all that stands between the query and an
 injection. String escaping there is single-quote doubling, which is correct
 under `standard_conforming_strings` — on by default since PostgreSQL 9.1, and

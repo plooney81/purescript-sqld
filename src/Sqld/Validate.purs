@@ -44,22 +44,20 @@
 -- |
 -- | The walk carries no catch-all case, so a constructor added to `Sqld.Core`
 -- | fails to compile here exactly as it does in `Sqld.Format`. A *field* added
--- | to one of the records — `Query`, `Insert`, `Update`, `Delete` — is not
--- | caught that way, since a record pattern does not have to be exhaustive.
--- | `Test.Sqld.ValidateSpec` covers that gap from the other side: every corpus
--- | entry must validate clean, and the corpus is already ratcheted to reach
--- | every constructor.
+-- | to `QueryFields`, `InsertFields`, `UpdateFields` or `DeleteFields` is not
+-- | caught that way, since a record pattern does not have to be exhaustive, and
+-- | nothing else catches it either: the corpus sweep in
+-- | `Test.Sqld.ValidateSpec` asserts only that well-formed statements produce
+-- | no errors, which a walk that skipped the new field would satisfy just as
+-- | well. What holds each field is the negative case beside that sweep — one
+-- | per field, each feeding in a name the field alone can reject. A field added
+-- | without one is unchecked, silently.
 module Sqld.Validate
   ( IdentRole(..)
   , FormatError(..)
+  , class Validate
   , validate
-  , validateInsert
-  , validateUpdate
-  , validateDelete
   , formatChecked
-  , formatInsertChecked
-  , formatUpdateChecked
-  , formatDeleteChecked
   , validIdentifier
   , validFunctionName
   ) where
@@ -75,8 +73,8 @@ import Data.Maybe (Maybe(..))
 import Data.String as String
 import Data.String.CodeUnits (toCharArray, uncons) as CU
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Cte(..), Delete, Distinct(..), Expr(..), FormattedQuery, GroupingElement(..), Insert, InsertSource(..), Join, JoinCondition(..), Locking, OnConflict(..), OrderExpr, Query, Relation(..), SelectExpr(..), SetOperation(..), Update)
-import Sqld.Format (format, formatDeleteStmt, formatInsert, formatUpdateStmt)
+import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), FormattedQuery, GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), Locking, OnConflict(..), OrderExpr, Query(..), Relation(..), SelectExpr(..), SetOperation(..), Statement(..), Update(..))
+import Sqld.Format (class Format, format)
 
 -- ---------------------------------------------------------------------------
 -- Errors
@@ -168,17 +166,13 @@ validFunctionName name =
 -- | it covers. A `Right` says the identifiers and function names are
 -- | well-formed, not that the query is safe — an operator or a `raw` fragment
 -- | built from untrusted input is still whatever the caller made it.
-formatChecked :: Query -> Either (NonEmptyArray FormatError) FormattedQuery
+formatChecked
+  :: ∀ a
+   . Format a
+  => Validate a
+  => a
+  -> Either (NonEmptyArray FormatError) FormattedQuery
 formatChecked = checked validate format
-
-formatInsertChecked :: Insert -> Either (NonEmptyArray FormatError) FormattedQuery
-formatInsertChecked = checked validateInsert formatInsert
-
-formatUpdateChecked :: Update -> Either (NonEmptyArray FormatError) FormattedQuery
-formatUpdateChecked = checked validateUpdate formatUpdateStmt
-
-formatDeleteChecked :: Delete -> Either (NonEmptyArray FormatError) FormattedQuery
-formatDeleteChecked = checked validateDelete formatDeleteStmt
 
 -- | Runs the check, and formats only if it found nothing.
 checked
@@ -195,9 +189,37 @@ checked check emit x = case NEA.fromArray (check x) of
 -- The walk
 -- ---------------------------------------------------------------------------
 
--- | Every problem in a query, in the order the SQL emits them.
-validate :: Query -> Array FormatError
-validate q =
+-- | Anything this module can check, mirroring `Sqld.Format.Format` so that
+-- | `formatChecked` needs one name rather than one per statement type.
+class Validate a where
+  -- | Every problem in a statement, in the order the SQL emits them.
+  validate :: a -> Array FormatError
+
+instance Validate Query where
+  validate = queryErrors
+
+instance Validate Insert where
+  validate = insertErrors
+
+instance Validate Update where
+  validate = updateErrors
+
+instance Validate Delete where
+  validate = deleteErrors
+
+-- | As with `Sqld.Format.Format`, each branch dispatches through the class, and
+-- | for the same reason: written this way a new constructor needs a `Validate`
+-- | instance for the type it unwraps, where a branch calling `insertErrors`
+-- | directly would not. Only the exhaustiveness of the `case` is enforced.
+instance Validate Statement where
+  validate = case _ of
+    SelectStmt q -> validate q
+    InsertStmt i -> validate i
+    UpdateStmt u -> validate u
+    DeleteStmt d -> validate d
+
+queryErrors :: Query -> Array FormatError
+queryErrors (Query q) =
   foldMap cte q.with
     <> foldMap setOp q.setOp
     <> foldMap distinct q.distinct
@@ -212,24 +234,24 @@ validate q =
     <> foldMap expr q.offset
     <> foldMap locking q.locking
 
-validateInsert :: Insert -> Array FormatError
-validateInsert i =
+insertErrors :: Insert -> Array FormatError
+insertErrors (Insert i) =
   ident TableName i.table
     <> foldMap (ident ColumnName) i.columns
     <> insertSource i.source
     <> foldMap onConflict i.onConflict
     <> foldMap selectExpr i.returning
 
-validateUpdate :: Update -> Array FormatError
-validateUpdate u =
+updateErrors :: Update -> Array FormatError
+updateErrors (Update u) =
   ident TableName u.table
     <> foldMap assignment u.set
     <> foldMap (ident TableName) u.from
     <> foldMap expr u.where_
     <> foldMap selectExpr u.returning
 
-validateDelete :: Delete -> Array FormatError
-validateDelete d =
+deleteErrors :: Delete -> Array FormatError
+deleteErrors (Delete d) =
   ident TableName d.table
     <> foldMap (ident TableName) d.using
     <> foldMap expr d.where_
@@ -249,7 +271,7 @@ expr (Unary _ e)             = expr e
 expr (Postfix _ e)           = expr e
 expr (Cast e _)              = expr e
 expr (Row es)                = foldMap expr es
-expr (Sub q)                 = validate q
+expr (Sub q)                 = queryErrors q
 expr (And es)                = foldMap expr es
 expr (Or es)                 = foldMap expr es
 expr (Between e lo hi)       = expr e <> expr lo <> expr hi
@@ -266,8 +288,8 @@ selectExpr (SelectStarFrom t)  = ident TableName t
 
 relation :: Relation -> Array FormatError
 relation (Table name alias) = ident TableName name <> foldMap (ident AliasName) alias
-relation (Derived q alias)  = validate q <> ident AliasName alias
-relation (Lateral q alias)  = validate q <> ident AliasName alias
+relation (Derived q alias)  = queryErrors q <> ident AliasName alias
+relation (Lateral q alias)  = queryErrors q <> ident AliasName alias
 
 joinItem :: Join -> Array FormatError
 joinItem j = relation j.relation <> joinCondition j.condition
@@ -298,14 +320,14 @@ cte :: Cte -> Array FormatError
 cte (Cte c) =
   ident CteName c.name
     <> foldMap (ident ColumnName) c.columns
-    <> validate c.query
+    <> queryErrors c.query
 
 setOp :: SetOperation -> Array FormatError
-setOp (SetOperation s) = validate s.left <> validate s.right
+setOp (SetOperation s) = queryErrors s.left <> queryErrors s.right
 
 insertSource :: InsertSource -> Array FormatError
 insertSource (InsertValues rows) = foldMap (foldMap expr) rows
-insertSource (InsertQuery q)     = validate q
+insertSource (InsertQuery q)     = queryErrors q
 
 onConflict :: OnConflict -> Array FormatError
 onConflict DoNothing = []

@@ -4,7 +4,7 @@ import Prelude (Unit, discard, (#))
 import Data.Tuple (Tuple(..))
 import Sqld.Core (Literal(..))
 import Sqld.Expr (bool, col, default_, excluded, str, (.==))
-import Sqld.Format (formatInsert, formatInsertInline)
+import Sqld.Format (format, formatInline)
 import Sqld.Select (as, cols, from, insertFrom, insertInto, onConflictDoNothing, onConflictUpdate, returning, select', star, values, where_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual)
@@ -16,7 +16,7 @@ insertSpec = describe "INSERT" do
     it "single row" do
       let sql = insertInto "users" ["name", "email"]
             # values [[str "Alice", str "alice@example.com"]]
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com')"
 
@@ -25,14 +25,14 @@ insertSpec = describe "INSERT" do
             # values [ [str "Alice", str "a@example.com"]
                       , [str "Bob", str "b@example.com"]
                       ]
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'a@example.com'), ('Bob', 'b@example.com')"
 
     it "parameterised format" do
       let fq = insertInto "users" ["name", "email"]
             # values [[str "Alice", str "alice@example.com"]]
-            # formatInsert
+            # format
       fq.sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ($1, $2)"
       fq.params `shouldEqual` [LitString "Alice", LitString "alice@example.com"]
@@ -41,7 +41,7 @@ insertSpec = describe "INSERT" do
     it "DEFAULT keyword in VALUES row" do
       let sql = insertInto "users" ["name", "email"]
             # values [[str "Alice", default_]]
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', DEFAULT)"
 
@@ -53,7 +53,7 @@ insertSpec = describe "INSERT" do
                     # from "users"
                     # where_ (col "active" .== bool false)
                 )
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"archive\" (\"name\", \"email\") SELECT \"name\", \"email\" FROM \"users\" WHERE \"active\" = FALSE"
 
@@ -62,7 +62,7 @@ insertSpec = describe "INSERT" do
       let sql = insertInto "users" ["name", "email"]
             # values [[str "Alice", str "alice@example.com"]]
             # onConflictDoNothing
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com') ON CONFLICT DO NOTHING"
 
@@ -70,7 +70,7 @@ insertSpec = describe "INSERT" do
       let sql = insertInto "users" ["name", "email"]
             # values [[str "Alice", str "alice@example.com"]]
             # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com') ON CONFLICT (\"email\") DO UPDATE SET \"name\" = \"excluded\".\"name\""
 
@@ -79,7 +79,7 @@ insertSpec = describe "INSERT" do
       let sql = insertInto "users" ["name", "email"]
             # values [[str "Alice", str "alice@example.com"]]
             # returning (cols ["id"])
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com') RETURNING \"id\""
 
@@ -87,7 +87,7 @@ insertSpec = describe "INSERT" do
       let sql = insertInto "users" ["name", "email"]
             # values [[str "Alice", str "alice@example.com"]]
             # returning [star]
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com') RETURNING *"
 
@@ -95,7 +95,7 @@ insertSpec = describe "INSERT" do
       let sql = insertInto "users" ["name", "email"]
             # values [[str "Alice", str "alice@example.com"]]
             # returning [as (col "id") "new_id"]
-            # formatInsertInline
+            # formatInline
       sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ('Alice', 'alice@example.com') RETURNING \"id\" AS \"new_id\""
 
@@ -105,7 +105,7 @@ insertSpec = describe "INSERT" do
             # values [[str "Alice", str "alice@example.com"]]
             # onConflictUpdate ["email"] [Tuple "name" (excluded "name")]
             # returning (cols ["id", "name"])
-            # formatInsert
+            # format
       fq.sql `shouldEqual`
         "INSERT INTO \"users\" (\"name\", \"email\") VALUES ($1, $2) ON CONFLICT (\"email\") DO UPDATE SET \"name\" = \"excluded\".\"name\" RETURNING \"id\", \"name\""
       fq.params `shouldEqual` [LitString "Alice", LitString "alice@example.com"]

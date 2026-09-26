@@ -16,41 +16,29 @@
 -- | `test/fixtures/schema.sql`.
 module Example.Cookbook
   ( Example
-  , InsertExample
-  , UpdateExample
-  , DeleteExample
   , cookbook
-  , insertCookbook
-  , updateCookbook
-  , deleteCookbook
+  , selectExamples
+  , insertExamples
+  , updateExamples
+  , deleteExamples
   ) where
 
 import Prelude hiding (between, not, sub)
 
 import Data.Maybe (Maybe(..), maybe)
 import Data.Tuple (Tuple(..))
-import Sqld.Core (Delete, Insert, JoinType(..), Query, Update, Window, emptyQuery)
+import Sqld.Core (Delete, Insert, JoinType(..), Query, Statement(..), Update, Window, emptyQuery)
 import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, excluded, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, deleteFrom, deleteReturning, deleteWhere, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, insertInto, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, onConflictUpdate, exprs, orderBy, returning, rightJoin, select, select', set, skipLocked, star, starFrom, tcols, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, withCte, with_)
 
+-- | One worked example: a name, and a statement of whichever kind.
+-- |
+-- | One type rather than four, because everything downstream — `EXAMPLES.md`,
+-- | the validation corpus, `Example.Main` — treats them alike, and `Statement`
+-- | is what lets it.
 type Example =
-  { name  :: String
-  , query :: Query
-  }
-
-type InsertExample =
-  { name   :: String
-  , insert :: Insert
-  }
-
-type UpdateExample =
-  { name   :: String
-  , update :: Update
-  }
-
-type DeleteExample =
-  { name   :: String
-  , delete :: Delete
+  { name      :: String
+  , statement :: Statement
   }
 
 -- #example basic-filtering
@@ -684,54 +672,63 @@ deleteUsingReturning =
 -- #end
 
 -- | Every example, in the order they appear in `EXAMPLES.md`.
+-- |
+-- | The four slices are kept apart because `Test.Sqld.Corpus` splices each one
+-- | in after its own hand-written entries of that kind; this concatenation is
+-- | the order `examples.json` is written in, and it is also the order the
+-- | `-- #example` markers appear in above, which `scripts/build-examples.mjs`
+-- | checks.
 cookbook :: Array Example
-cookbook =
-  [ { name: "basic-filtering",      query: basicFiltering }
-  , { name: "combining-conditions", query: combiningConditions }
-  , { name: "null-handling",        query: nullHandling }
-  , { name: "pattern-matching",     query: patternMatching }
-  , { name: "joins",                query: joins }
-  , { name: "right-join",           query: rightJoinExample }
-  , { name: "full-join",            query: fullJoinExample }
-  , { name: "cross-join",           query: crossJoinExample }
-  , { name: "join-using",           query: joinUsingExample }
-  , { name: "natural-join",         query: naturalJoinExample }
-  , { name: "aggregation",          query: aggregation }
-  , { name: "grouping-sets",        query: subtotals }
-  , { name: "aggregate-filter",     query: conditionalAggregates }
-  , { name: "window-functions",     query: windowFunctions }
-  , { name: "distinct",             query: distinctExample }
-  , { name: "distinct-on",          query: distinctOnExample }
-  , { name: "functions-and-casts",  query: functionsAndCasts }
-  , { name: "exists",               query: existsExample }
-  , { name: "not-exists",           query: notExistsExample }
-  , { name: "subquery-in",          query: subqueryIn }
-  , { name: "any-all",              query: anyAllExample }
-  , { name: "scalar-subquery",      query: scalarSubquery }
-  , { name: "derived-table",        query: derivedTable }
-  , { name: "derived-table-join",   query: derivedTableJoin }
-  , { name: "lateral-join",         query: lateralJoin }
-  , { name: "set-operations",       query: setOperations }
-  , { name: "common-table-expressions", query: commonTableExpressions }
-  , { name: "recursive-cte",        query: recursiveCte }
-  , { name: "pagination",           query: pagination }
-  , { name: "work-queue",           query: workQueue }
-  , { name: "composing-fragments",  query: composingFragments }
-  , { name: "merging-queries",      query: mergingQueries }
-  , { name: "raw-escape-hatch",     query: rawEscapeHatch }
+cookbook = selectExamples <> insertExamples <> updateExamples <> deleteExamples
+
+selectExamples :: Array Example
+selectExamples =
+  [ { name: "basic-filtering",      statement: SelectStmt basicFiltering }
+  , { name: "combining-conditions", statement: SelectStmt combiningConditions }
+  , { name: "null-handling",        statement: SelectStmt nullHandling }
+  , { name: "pattern-matching",     statement: SelectStmt patternMatching }
+  , { name: "joins",                statement: SelectStmt joins }
+  , { name: "right-join",           statement: SelectStmt rightJoinExample }
+  , { name: "full-join",            statement: SelectStmt fullJoinExample }
+  , { name: "cross-join",           statement: SelectStmt crossJoinExample }
+  , { name: "join-using",           statement: SelectStmt joinUsingExample }
+  , { name: "natural-join",         statement: SelectStmt naturalJoinExample }
+  , { name: "aggregation",          statement: SelectStmt aggregation }
+  , { name: "grouping-sets",        statement: SelectStmt subtotals }
+  , { name: "aggregate-filter",     statement: SelectStmt conditionalAggregates }
+  , { name: "window-functions",     statement: SelectStmt windowFunctions }
+  , { name: "distinct",             statement: SelectStmt distinctExample }
+  , { name: "distinct-on",          statement: SelectStmt distinctOnExample }
+  , { name: "functions-and-casts",  statement: SelectStmt functionsAndCasts }
+  , { name: "exists",               statement: SelectStmt existsExample }
+  , { name: "not-exists",           statement: SelectStmt notExistsExample }
+  , { name: "subquery-in",          statement: SelectStmt subqueryIn }
+  , { name: "any-all",              statement: SelectStmt anyAllExample }
+  , { name: "scalar-subquery",      statement: SelectStmt scalarSubquery }
+  , { name: "derived-table",        statement: SelectStmt derivedTable }
+  , { name: "derived-table-join",   statement: SelectStmt derivedTableJoin }
+  , { name: "lateral-join",         statement: SelectStmt lateralJoin }
+  , { name: "set-operations",       statement: SelectStmt setOperations }
+  , { name: "common-table-expressions", statement: SelectStmt commonTableExpressions }
+  , { name: "recursive-cte",        statement: SelectStmt recursiveCte }
+  , { name: "pagination",           statement: SelectStmt pagination }
+  , { name: "work-queue",           statement: SelectStmt workQueue }
+  , { name: "composing-fragments",  statement: SelectStmt composingFragments }
+  , { name: "merging-queries",      statement: SelectStmt mergingQueries }
+  , { name: "raw-escape-hatch",     statement: SelectStmt rawEscapeHatch }
   ]
 
-insertCookbook :: Array InsertExample
-insertCookbook =
-  [ { name: "upsert", insert: upsert }
+insertExamples :: Array Example
+insertExamples =
+  [ { name: "upsert", statement: InsertStmt upsert }
   ]
 
-updateCookbook :: Array UpdateExample
-updateCookbook =
-  [ { name: "update-from-returning", update: updateFromReturning }
+updateExamples :: Array Example
+updateExamples =
+  [ { name: "update-from-returning", statement: UpdateStmt updateFromReturning }
   ]
 
-deleteCookbook :: Array DeleteExample
-deleteCookbook =
-  [ { name: "delete-using-returning", delete: deleteUsingReturning }
+deleteExamples :: Array Example
+deleteExamples =
+  [ { name: "delete-using-returning", statement: DeleteStmt deleteUsingReturning }
   ]
