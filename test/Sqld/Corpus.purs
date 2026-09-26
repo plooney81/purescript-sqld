@@ -28,7 +28,7 @@ import Data.Maybe (Maybe(..), isJust, maybe)
 import Example.Cookbook (deleteExamples, insertExamples, selectExamples, updateExamples) as Cookbook
 import Data.Tuple (Tuple(..))
 import Sqld.Core (Cte(..), Delete(..), Distinct(..), Expr(..), Frame, FrameBound(..), FrameMode(..), GroupingElement(..), Insert(..), InsertSource(..), Join, JoinCondition(..), JoinType(..), Literal(..), LockStrength(..), LockWait(..), Locking, NullOrder(..), OnConflict(..), OrderDir(..), OrderExpr, QuantOp(..), Query(..), Relation(..), SelectExpr(..), SetOp(..), SetOperation(..), Statement(..), Update(..), Window, emptyWindow)
-import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, default_, denseRank, eqAny, excluded, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
+import Sqld.Expr (allOf, and, anyOf, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, default_, denseRank, eqAny, excluded, exists, filterWhere, following, frameFrom, groups, ilike, in_, inSub, int, isNotNull, isNull, jsonConcat, jsonContainedBy, jsonContains, jsonDelete, jsonGet, jsonGetText, jsonHasKey, lag, lead, like, not, notExists, notILike, notIn, notInSub, notLike, null, num, or, orderWindow, orderWindow', over, partitionBy', preceding, range, rank, raw, rowNumber, rows, str, sub, sum_, tcol, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.<), (.<=), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, ascNullsFirst, ascNullsLast, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, deleteFrom, deleteReturning, deleteWhere, derived, desc, descNullsFirst, descNullsLast, distinct, distinctOn, except, exceptAll, expr, exprs, forKeyShare, forNoKeyUpdate, forShare, forUpdate, from, fromAs, fromLateral, fromSub, fullJoinAs, groupBy, groupByCube, groupByRollup, groupBySets, having, innerJoin, insertFrom, insertInto, intersect, intersectAll, joinLateral, joinOn, joinRel, joinUsing, lateral, leftJoinAs, leftJoinLateral, limit, limitAll, lockOf, naturalJoin, noWait, offset, onConflictDoNothing, onConflictUpdate, orderBy, orderUsing, returning, rightJoin, select', set, skipLocked, star, starFrom, tcolAs, tcols, union, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, with_, withCte, withRecursive)
 
 -- | One corpus entry: a name, and a statement of whichever kind. One type
@@ -1417,6 +1417,69 @@ selectHandWritten =
         # from "users"
         # where_ (col "name" .== str "'; DROP TABLE users; --")
     }
+
+  -- The jsonb operators. Each one is here so PostgreSQL resolves it against a
+  -- real jsonb column: which overload a bare `$n` picks is PostgreSQL's
+  -- decision, not this library's, and these entries are what pin it.
+  , { name: "json-get"
+    , statement: SelectStmt $ select' [ expr (jsonGet (col "payload") (str "user")) ]
+        # from "documents"
+    }
+  , { name: "json-get-text"
+    , statement: SelectStmt $ select' [ expr (jsonGetText (col "payload") (str "email")) ]
+        # from "documents"
+    }
+
+  -- `->>` is an "other operator", which binds tighter than the comparison, so
+  -- the printer is right to leave the brackets off. If it ever stops being
+  -- right, this is the entry that fails.
+  , { name: "json-get-text-compared"
+    , statement: SelectStmt $ select' (cols [ "id" ])
+        # from "documents"
+        # where_ (jsonGetText (col "payload") (str "status") .== str "paid")
+    }
+
+  -- An integer key has to say so. Bare, it would bind as `text` and read the
+  -- object key "0" instead of indexing the array.
+  , { name: "json-get-array-index"
+    , statement: SelectStmt $ select' [ expr (jsonGet (col "payload") (cast (int 0) "integer")) ]
+        # from "documents"
+    }
+
+  -- `@>`, `<@` and `||` bind their right operand as `jsonb`, not as `text`, so
+  -- the literal has to be a valid document: the inlined form runs jsonb's input
+  -- function at parse analysis, and `'paid'::jsonb` does not prepare.
+  , { name: "json-contains"
+    , statement: SelectStmt $ select' (cols [ "id" ])
+        # from "documents"
+        # where_ (jsonContains (col "payload") (str "{\"status\": \"paid\"}"))
+    }
+  , { name: "json-contained-by"
+    , statement: SelectStmt $ select' (cols [ "id" ])
+        # from "documents"
+        # where_ (jsonContainedBy (col "payload") (str "{\"a\": 1, \"b\": 2}"))
+    }
+  , { name: "json-has-key"
+    , statement: SelectStmt $ select' (cols [ "id" ])
+        # from "documents"
+        # where_ (jsonHasKey (col "payload") (str "email"))
+    }
+  , { name: "json-concat"
+    , statement: SelectStmt $ select' [ expr (jsonConcat (col "payload") (str "{\"seen\": true}")) ]
+        # from "documents"
+    }
+  , { name: "json-delete"
+    , statement: SelectStmt $ select' [ expr (jsonDelete (col "payload") (str "tmp")) ]
+        # from "documents"
+    }
+
+  -- `-` is arithmetic precedence and `->` is not, so the left operand needs
+  -- brackets. Without them PostgreSQL reads `$1 - $2` as the right operand of
+  -- `->` and rejects the statement.
+  , { name: "json-delete-under-get"
+    , statement: SelectStmt $ select' [ expr (jsonDelete (jsonGet (col "payload") (str "meta")) (str "tmp")) ]
+        # from "documents"
+    }
   ]
 
 -- ---------------------------------------------------------------------------
@@ -1876,6 +1939,17 @@ requiredTags = Array.sort
   , "Expr.BinOp.+"
   , "Expr.BinOp.*"
   , "Expr.BinOp.||"
+  -- The jsonb operators, each held to an entry of its own. Two of them buy
+  -- nothing: the tag is the operator as written, so `||` is indistinguishable
+  -- from string concatenation and `-` from arithmetic, and both were already
+  -- covered before any of this. The jsonb entries for `jsonConcat` and
+  -- `jsonDelete` are held by review rather than by the ratchet.
+  , "Expr.BinOp.-"
+  , "Expr.BinOp.->"
+  , "Expr.BinOp.->>"
+  , "Expr.BinOp.@>"
+  , "Expr.BinOp.<@"
+  , "Expr.BinOp.?"
   , "Expr.Unary"
   , "Expr.Unary.NOT"
   , "Expr.Unary.EXISTS"
