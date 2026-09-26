@@ -63,14 +63,22 @@ they are monomorphic that is a type error rather than a warning. This flag
 extends the same idea to everything the compiler would otherwise only mention
 in passing, which is the class that accumulates across refactors.
 
-Adding a statement type works the same way, once you have taken the first step.
-Nothing forces you to take it: a statement type that never joins the `Statement`
-sum in `Sqld.Core` compiles perfectly well on its own. Add the constructor,
-though, and the rest follows — the `Format` and `Validate` instances for
-`Statement` and `statementTags` in the corpus are exhaustive `case` expressions
-over it, so each is a compile error until it has a branch, and each branch then
-demands the per-type instance, because those instances dispatch back through the
-class rather than calling the renderer underneath it.
+Adding a statement type is only partly enforced, so it is worth knowing which
+part. Nothing obliges you to add a `Statement` constructor in the first place —
+a statement type that never joins the sum compiles perfectly well alone. Add
+one, and the compiler then demands exactly three things, because the `Format`
+and `Validate` instances for `Statement` and `statementTags` in the corpus are
+exhaustive `case` expressions over it: a **branch** in each. It does not demand
+anything about what those branches contain. A branch calling `formatInsertSql`
+or `insertErrors` directly compiles without a `Format` or `Validate` instance
+for the new type at all, and `statementTags` calls the per-type taggers
+directly by design.
+
+So write each branch through the class — `InsertStmt i -> renderWith layout i`,
+not `InsertStmt i -> formatInsertSql layout i`. That is a convention the
+existing branches follow rather than a rule the compiler imposes, and it is what
+makes the per-type instance a compile error rather than an omission nobody
+notices.
 
 Fix the warning rather than working around it. If one genuinely has to be
 tolerated, `censorProjectWarnings` in `spago.yaml` is the escape hatch — record

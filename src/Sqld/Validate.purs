@@ -44,11 +44,14 @@
 -- |
 -- | The walk carries no catch-all case, so a constructor added to `Sqld.Core`
 -- | fails to compile here exactly as it does in `Sqld.Format`. A *field* added
--- | to one of the records — `Query`, `Insert`, `Update`, `Delete` — is not
--- | caught that way, since a record pattern does not have to be exhaustive.
--- | `Test.Sqld.ValidateSpec` covers that gap from the other side: every corpus
--- | entry must validate clean, and the corpus is already ratcheted to reach
--- | every constructor.
+-- | to `QueryFields`, `InsertFields`, `UpdateFields` or `DeleteFields` is not
+-- | caught that way, since a record pattern does not have to be exhaustive, and
+-- | nothing else catches it either: the corpus sweep in
+-- | `Test.Sqld.ValidateSpec` asserts only that well-formed statements produce
+-- | no errors, which a walk that skipped the new field would satisfy just as
+-- | well. What holds each field is the negative case beside that sweep — one
+-- | per field, each feeding in a name the field alone can reject. A field added
+-- | without one is unchecked, silently.
 module Sqld.Validate
   ( IdentRole(..)
   , FormatError(..)

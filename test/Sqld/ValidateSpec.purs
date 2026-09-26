@@ -15,7 +15,7 @@ import Data.Foldable (for_)
 import Data.Tuple (Tuple(..))
 import Sqld.Core (Statement(..))
 import Sqld.Expr (app, col, int, str, tcol, (.==))
-import Sqld.Select (as, cols, deleteFrom, deleteWhere, from, insertInto, select', set, update, where_, with_)
+import Sqld.Select (as, cols, deleteFrom, deleteReturning, deleteWhere, from, insertFrom, insertInto, onConflictUpdate, returning, select', set, update, updateFrom, updateReturning, using, values, where_, with_)
 import Sqld.Validate (FormatError(..), IdentRole(..), formatChecked, validFunctionName, validate)
 import Test.Sqld.Corpus (corpus)
 import Test.Spec (Spec, describe, it)
@@ -82,6 +82,60 @@ validateSpec = describe "Sqld.Validate" do
 
     it "a SELECT wrapped in a Statement reports what the bare one does" do
       validate (SelectStmt (select' (cols [ "" ]) # from "users"))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+  -- One case per field of the three non-`Query` walks. The sweep above asserts
+  -- only `[]`, so without these a walk could drop a field entirely and stay
+  -- green: each of these names something only that field can reject.
+  describe "every field of every walk is reached" do
+    it "INSERT: the VALUES rows" do
+      validate (insertInto "users" [ "a" ] # values [ [ col "" ] ])
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "INSERT: the source query of an INSERT … SELECT" do
+      validate (insertInto "users" [ "a" ] # insertFrom (select' (cols [ "" ]) # from "t"))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "INSERT: the ON CONFLICT target columns" do
+      validate
+        ( insertInto "users" [ "a" ]
+            # values [ [ int 1 ] ]
+            # onConflictUpdate [ "" ] [ Tuple "a" (int 1) ]
+        ) `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "INSERT: the ON CONFLICT assignments" do
+      validate
+        ( insertInto "users" [ "a" ]
+            # values [ [ int 1 ] ]
+            # onConflictUpdate [ "a" ] [ Tuple "" (int 1) ]
+        ) `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "INSERT: RETURNING" do
+      validate (insertInto "users" [ "a" ] # values [ [ int 1 ] ] # returning (cols [ "" ]))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "UPDATE: the SET column name" do
+      validate (update "orders" # set [ Tuple "" (int 1) ])
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "UPDATE: the SET value expression" do
+      validate (update "orders" # set [ Tuple "a" (col "") ])
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "UPDATE: FROM" do
+      validate (update "orders" # updateFrom "")
+        `shouldEqual` [ EmptyIdentifier TableName ]
+
+    it "UPDATE: RETURNING" do
+      validate (update "orders" # updateReturning (cols [ "" ]))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "DELETE: USING" do
+      validate (deleteFrom "orders" # using [ "" ])
+        `shouldEqual` [ EmptyIdentifier TableName ]
+
+    it "DELETE: RETURNING" do
+      validate (deleteFrom "orders" # deleteReturning (cols [ "" ]))
         `shouldEqual` [ EmptyIdentifier ColumnName ]
 
   describe "formatChecked on every statement type" do

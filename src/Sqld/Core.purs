@@ -230,11 +230,13 @@ type Frame =
 
 -- | One entry in a `WITH` clause: a named intermediate result set.
 -- |
--- | A `newtype` around the record rather than a bare record synonym, because a
--- | CTE holds a `Query` and a `Query` holds CTEs: two synonyms closing a cycle
--- | is what PureScript rejects. `Query` is a `newtype` for a different reason —
--- | it needs somewhere to hang an instance — and either one alone would be
--- | enough to stop the expansion, so this one is now belt and braces.
+-- | A `newtype` rather than a bare record synonym, though no longer out of
+-- | necessity. It began as one because a CTE holds a `Query` and a `Query`
+-- | holds CTEs, and two synonyms closing a cycle is what PureScript rejects.
+-- | `Query` is a `newtype` now — for its own reason, to carry an instance — and
+-- | one `newtype` anywhere on a cycle is enough to stop expansion, so
+-- | `type Cte = { …, query :: Query }` would compile today. It stays a
+-- | `newtype` for consistency with the statement types, not because it must be.
 -- |
 -- | `columns` is the optional output column list, `WITH "t" ("a", "b") AS (…)`;
 -- | empty omits it.
@@ -267,8 +269,9 @@ instance Keyword SetOp where
 
 -- | Two result sets combined: `left UNION right`, and so on.
 -- |
--- | A `newtype` for the same reason as `Cte`: it sits on a cycle through
--- | `Query`, and a record synonym there would be a recursive synonym.
+-- | A `newtype` for the same reason as `Cte`, and with the same caveat: the
+-- | cycle it sits on runs through `Query`, which is itself a `newtype`, so a
+-- | record synonym here would compile. It stays one for consistency.
 -- |
 -- | Both operands are complete queries, and both are bracketed when emitted.
 -- | That makes a chain unambiguous whatever PostgreSQL's own precedence between
