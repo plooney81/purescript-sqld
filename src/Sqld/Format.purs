@@ -110,8 +110,11 @@ instance Format Delete where
 -- | A `Statement` emits exactly what the statement inside it emits.
 -- |
 -- | Each branch goes back through the class rather than calling the renderer
--- | beneath it, so a statement type added to `Statement` without an instance of
--- | its own does not compile.
+-- | beneath it. Keep it that way: a branch written like this needs a `Format`
+-- | instance for the type it unwraps, so adding a constructor here without one
+-- | is a compile error — whereas a branch calling `formatInsertSql` directly
+-- | would compile perfectly well without any instance at all. The compiler
+-- | insists only that the `case` be exhaustive; the rest is convention.
 instance Format Statement where
   renderWith layout = case _ of
     SelectStmt q -> renderWith layout q

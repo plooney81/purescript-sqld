@@ -15,7 +15,7 @@ import Data.Foldable (for_)
 import Data.Tuple (Tuple(..))
 import Sqld.Core (Statement(..))
 import Sqld.Expr (app, col, int, str, tcol, (.==))
-import Sqld.Select (as, cols, deleteFrom, deleteReturning, deleteWhere, from, insertFrom, insertInto, onConflictUpdate, returning, select', set, update, updateFrom, updateReturning, using, values, where_, with_)
+import Sqld.Select (as, asc, cols, deleteFrom, deleteReturning, deleteWhere, distinctOn, forUpdate, from, groupBy, having, innerJoin, insertFrom, insertInto, limitExpr, lockOf, offsetExpr, onConflictUpdate, orderBy, returning, select', set, union, update, updateFrom, updateReturning, updateWhere, using, values, where_, with_)
 import Sqld.Validate (FormatError(..), IdentRole(..), formatChecked, validFunctionName, validate)
 import Test.Sqld.Corpus (corpus)
 import Test.Spec (Spec, describe, it)
@@ -84,10 +84,56 @@ validateSpec = describe "Sqld.Validate" do
       validate (SelectStmt (select' (cols [ "" ]) # from "users"))
         `shouldEqual` [ EmptyIdentifier ColumnName ]
 
-  -- One case per field of the three non-`Query` walks. The sweep above asserts
-  -- only `[]`, so without these a walk could drop a field entirely and stay
-  -- green: each of these names something only that field can reject.
-  describe "every field of every walk is reached" do
+  -- One case per field of every walk. The sweep above asserts only `[]`, so
+  -- without these a walk could drop a field entirely and stay green: each
+  -- fixture below is otherwise clean and names something only that one field
+  -- can reject.
+  --
+  -- `with`, `select` and `from` are the three the `identifiers` block above
+  -- already pins — empty CTE name, empty column, empty table — so they are not
+  -- repeated here. Every other field of `QueryFields` is.
+  describe "every field of the SELECT walk is reached" do
+    it "setOp" do
+      validate (select' (cols [ "id" ]) # from "users" # union (select' (cols [ "" ]) # from "t"))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "distinct" do
+      validate (select' (cols [ "id" ]) # from "users" # distinctOn [ col "" ])
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "joins" do
+      validate (select' (cols [ "id" ]) # from "users" # innerJoin "orders" (col "" .== int 1))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "where_" do
+      validate (select' (cols [ "id" ]) # from "users" # where_ (col "" .== int 1))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "groupBy" do
+      validate (select' (cols [ "id" ]) # from "users" # groupBy [ col "" ])
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "having" do
+      validate (select' (cols [ "id" ]) # from "users" # having (col "" .== int 1))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "orderBy" do
+      validate (select' (cols [ "id" ]) # from "users" # orderBy [ asc (col "") ])
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "limit" do
+      validate (select' (cols [ "id" ]) # from "users" # limitExpr (col ""))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "offset" do
+      validate (select' (cols [ "id" ]) # from "users" # offsetExpr (col ""))
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "locking" do
+      validate (select' (cols [ "id" ]) # from "users" # forUpdate # lockOf [ "" ])
+        `shouldEqual` [ EmptyIdentifier TableName ]
+
+  describe "every field of the INSERT, UPDATE and DELETE walks is reached" do
     it "INSERT: the VALUES rows" do
       validate (insertInto "users" [ "a" ] # values [ [ col "" ] ])
         `shouldEqual` [ EmptyIdentifier ColumnName ]
@@ -120,6 +166,10 @@ validateSpec = describe "Sqld.Validate" do
 
     it "UPDATE: the SET value expression" do
       validate (update "orders" # set [ Tuple "a" (col "") ])
+        `shouldEqual` [ EmptyIdentifier ColumnName ]
+
+    it "UPDATE: WHERE" do
+      validate (update "orders" # updateWhere (col "" .== int 1))
         `shouldEqual` [ EmptyIdentifier ColumnName ]
 
     it "UPDATE: FROM" do

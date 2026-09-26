@@ -1002,8 +1002,8 @@ PostgreSQL cares about.
 
 ### The debug formatters
 
-`formatInline` and `formatPretty` write the values into the string itself. They exist for logs and
-for reading; handing one to a driver gives up the guarantee `format` provides,
+`formatInline` and `formatPretty` write the values into the string itself.
+They exist for logs and for reading; handing one to a driver gives up the guarantee `format` provides,
 and a single quote in a value is then all that stands between the query and an
 injection. String escaping there is single-quote doubling, which is correct
 under `standard_conforming_strings` — on by default since PostgreSQL 9.1, and

@@ -1,11 +1,11 @@
 module Test.Sqld.FormatSpec where
 
 import Prelude (Unit, discard, negate, (#), (<>))
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst)
 import Data.String (trim)
 import Sqld.Core (JoinCondition(..), JoinType(..), Literal(..), Statement(..))
 import Sqld.Expr (and, between, binOp, bool, cast, col, countStar, currentRow, excluded, exists, in_, inSub, int, null, num, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, tcol, unboundedPreceding, withFrame, (.<), (.==))
-import Sqld.Format (format, formatInline, formatPretty, quoteIdent)
+import Sqld.Format (class Format, Layout(..), emptyBindings, format, formatInline, formatPretty, quoteIdent, renderWith)
 import Sqld.Select (as, asc, cols, deleteFrom, deleteReturning, deleteWhere, derived, desc, except, expr, forUpdate, from, fromAs, fromSub, insertInto, joinOn, joinRel, lateral, leftJoin, limit, onConflictUpdate, orderBy, returning, select', set, skipLocked, star, starFrom, union, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, with_)
 import Test.Spec (Spec, describe, it)
 import Test.Spec.Assertions (shouldEqual, shouldNotEqual)
@@ -490,10 +490,15 @@ FOR UPDATE SKIP LOCKED
       formatPretty insertStmt `shouldNotEqual` formatInline insertStmt
       formatPretty updateStmt `shouldNotEqual` formatInline updateStmt
       formatPretty deleteStmt `shouldNotEqual` formatInline deleteStmt
-      (format selectStmt).sql `shouldNotEqual` formatPretty selectStmt
-      (format insertStmt).sql `shouldNotEqual` formatPretty insertStmt
-      (format updateStmt).sql `shouldNotEqual` formatPretty updateStmt
-      (format deleteStmt).sql `shouldNotEqual` formatPretty deleteStmt
+      -- And that the *parameterised* rendering differs by layout too. Comparing
+      -- `(format x).sql` against `formatPretty x` would prove nothing: those
+      -- differ because one binds `$1` and the other inlines the value,
+      -- whichever layout each used. Pretty-printing with the literals still
+      -- bound is the comparison that isolates layout.
+      (format selectStmt).sql `shouldNotEqual` boundPretty selectStmt
+      (format insertStmt).sql `shouldNotEqual` boundPretty insertStmt
+      (format updateStmt).sql `shouldNotEqual` boundPretty updateStmt
+      (format deleteStmt).sql `shouldNotEqual` boundPretty deleteStmt
 
     it "SelectStmt" do
       format (SelectStmt selectStmt) `shouldEqual` format selectStmt
@@ -522,6 +527,12 @@ FOR UPDATE SKIP LOCKED
             # where_ (col "id" .== int 42)
             # formatInline
       query `shouldEqual` "SELECT \"id\", \"name\", \"email\" FROM \"users\" WHERE \"id\" = 42"
+
+-- | The parameterised rendering at the pretty layout — `format` with the
+-- | clauses broken across lines. Only `Test.Sqld.FormatSpec` needs it, to show
+-- | that layout alone changes the output of the bound form.
+boundPretty :: forall a. Format a => a -> String
+boundPretty x = fst (renderWith (Pretty 0) x emptyBindings)
 
 -- | A NUL byte, spelled out so the escape cannot run into the character after
 -- | it: `"\x0b"` is one hex escape, not a NUL and a `b`.

@@ -207,9 +207,10 @@ instance Validate Update where
 instance Validate Delete where
   validate = deleteErrors
 
--- | As with `Sqld.Format.Format`, each branch dispatches through the class, so
--- | a statement type added to `Statement` without an instance here does not
--- | compile.
+-- | As with `Sqld.Format.Format`, each branch dispatches through the class, and
+-- | for the same reason: written this way a new constructor needs a `Validate`
+-- | instance for the type it unwraps, where a branch calling `insertErrors`
+-- | directly would not. Only the exhaustiveness of the `case` is enforced.
 instance Validate Statement where
   validate = case _ of
     SelectStmt q -> validate q
