@@ -253,12 +253,16 @@ genAtom scope ty =
     , Tuple 1.0 (genTypedLit ty)
     ]
 
+-- | Exhaustive on purpose. A catch-all here would not be a default, it would be
+-- | a guess about a type that does not exist yet: the next constructor added to
+-- | `SqlType` would silently be generated as a number.
 composites :: Scope -> Int -> SqlType -> Array (Tuple Number (Gen Expr))
 composites scope fuel = case _ of
   TyBool -> boolOps scope fuel
   TyText -> textOps scope fuel
   TyTime -> timeOps scope fuel
-  ty -> numberOps scope fuel ty
+  TyInt -> numberOps scope fuel TyInt
+  TyNum -> numberOps scope fuel TyNum
 
 boolOps :: Scope -> Int -> Array (Tuple Number (Gen Expr))
 boolOps scope fuel =
@@ -323,7 +327,13 @@ numberOps scope fuel ty =
   where
   sub = genExpr scope (fuel - 1)
   counterpart TyInt = TyNum
-  counterpart _ = TyInt
+  counterpart TyNum = TyInt
+  -- Unreachable: `numberOps` is only reached for the two numeric types. Spelled
+  -- out rather than left to a catch-all so a type added to `SqlType` has to be
+  -- considered here, instead of quietly acquiring a cast to `integer`.
+  counterpart TyText = TyInt
+  counterpart TyBool = TyInt
+  counterpart TyTime = TyInt
 
 textOps :: Scope -> Int -> Array (Tuple Number (Gen Expr))
 textOps scope fuel =
@@ -847,7 +857,8 @@ genGroupKey scope = do
   wrapped TyText e = App "UPPER" [ e ]
   wrapped TyBool e = Unary "NOT" e
   wrapped TyTime e = e
-  wrapped _ e = App "ABS" [ e ]
+  wrapped TyInt e = App "ABS" [ e ]
+  wrapped TyNum e = App "ABS" [ e ]
 
 genGrouping :: Array Expr -> Gen (Array GroupingElement)
 genGrouping keys =
