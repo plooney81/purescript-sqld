@@ -193,12 +193,23 @@ words = [ "alpha", "beta", "gamma", "engineering", "paid", "pending", "a%", "%b%
 timestamps :: Array String
 timestamps = [ "2024-01-01T00:00:00Z", "2020-06-30T12:34:56Z", "1999-12-31T23:59:59Z" ]
 
+-- | The documents a `jsonb` literal is drawn from. Every one is valid JSON and
+-- | free of `$`, for the same two reasons `words` is.
+jsonDocuments :: Array String
+jsonDocuments =
+  [ "{}", "[]", "{\"a\": 1}", "{\"status\": \"paid\"}", "[1, 2, 3]", "true" ]
+
 genLit :: SqlType -> Gen Literal
 genLit TyInt = LitInt <$> chooseInt (-1000) 1000
 genLit TyNum = (\n -> LitNumber (toNumber n / 100.0)) <$> chooseInt (-100000) 100000
 genLit TyText = LitString <$> pickOr (pure "alpha") words
 genLit TyBool = LitBoolean <$> chance 0.5
 genLit TyTime = LitString <$> pickOr (pure "2024-01-01T00:00:00Z") timestamps
+-- Unreachable while `TyJson` stays out of `allTypes` and `genType`, but it has
+-- to be right rather than merely present: `genTypedLit` casts what this returns,
+-- and PostgreSQL runs jsonb's input function at parse analysis, so an invalid
+-- document fails `PREPARE` on the inlined form rather than at execution.
+genLit TyJson = LitString <$> pickOr (pure "{}") jsonDocuments
 
 -- | A literal wearing its type.
 -- |
@@ -263,6 +274,12 @@ composites scope fuel = case _ of
   TyTime -> timeOps scope fuel
   TyInt -> numberOps scope fuel TyInt
   TyNum -> numberOps scope fuel TyNum
+  -- Atoms only. `TyJson` is not in `allTypes` or `genType`, so nothing asks for
+  -- a jsonb expression today; this branch exists to close the fallthrough
+  -- rather than to leave it merely unreached. Giving it operators means working
+  -- out which of them return jsonb as against merely taking it, which is a
+  -- separate piece of work.
+  TyJson -> []
 
 boolOps :: Scope -> Int -> Array (Tuple Number (Gen Expr))
 boolOps scope fuel =
@@ -334,6 +351,7 @@ numberOps scope fuel ty =
   counterpart TyText = TyInt
   counterpart TyBool = TyInt
   counterpart TyTime = TyInt
+  counterpart TyJson = TyInt
 
 textOps :: Scope -> Int -> Array (Tuple Number (Gen Expr))
 textOps scope fuel =
@@ -859,6 +877,11 @@ genGroupKey scope = do
   wrapped TyTime e = e
   wrapped TyInt e = App "ABS" [ e ]
   wrapped TyNum e = App "ABS" [ e ]
+  -- Reachable, unlike the other `TyJson` branches: `genGroupKey` draws from
+  -- `scopeColumns` rather than from `genType`, so it does meet the fixture's
+  -- jsonb column. Grouping on it bare is fine — jsonb has a default btree
+  -- opclass — where `ABS(jsonb)` is not a function that exists.
+  wrapped TyJson e = e
 
 genGrouping :: Array Expr -> Gen (Array GroupingElement)
 genGrouping keys =
