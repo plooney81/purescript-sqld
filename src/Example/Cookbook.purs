@@ -28,7 +28,7 @@ import Prelude hiding (between, not, sub)
 import Data.Maybe (Maybe(..), maybe)
 import Data.Tuple (Tuple(..))
 import Sqld.Core (Delete, Insert, JoinType(..), Query, Statement(..), Update, Window, emptyQuery)
-import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, excluded, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
+import Sqld.Expr (and, app, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, eqAny, excluded, exists, filterWhere, ilike, in_, inSub, int, isNotNull, isNull, jsonContains, jsonGetText, jsonHasKey, lag, like, not, notExists, num, or, orderWindow, over, partitionBy', raw, rowNumber, rows, str, sub, sum_, unboundedPreceding, withFrame, (.<), (.==), (.>), (.>=))
 import Sqld.Select (as, asc, colAs, cols, crossJoin, cte, cteColumns, cteRecursive, deleteFrom, deleteReturning, deleteWhere, derived, desc, distinct, distinctOn, except, expr, forUpdate, from, fromAs, fromSub, fullJoinAs, groupBy, groupByRollup, having, innerJoin, innerJoinAs, insertInto, joinLateral, joinOn, joinUsing, leftJoinAs, limit, mergeQueries, naturalJoin, offset, onConflictUpdate, exprs, orderBy, returning, rightJoin, select, select', set, skipLocked, star, starFrom, tcols, unionAll, update, updateFrom, updateReturning, updateWhere, using, values, where_, withCte, with_)
 
 -- | One worked example: a name, and a statement of whichever kind.
@@ -307,6 +307,30 @@ functionsAndCasts =
     ]
     # from "users"
     # where_ (binOp "*" (binOp "+" (col "age") (int 1)) (int 2) .> int 40)
+
+-- #example json-fields
+-- # Reading fields out of a jsonb column
+-- PostgreSQL's own JSON operators have named helpers, so the operator string is
+-- the library's rather than the caller's — `jsonGetText` is `->>` and cannot be
+-- anything else, where `binOp` would take whatever it was handed.
+--
+-- The two used here bind their right operand differently, which is PostgreSQL's
+-- rule rather than this library's: `->>` takes a key, `@>` takes a whole
+-- document. Getting that backwards is a type error rather than a silent one.
+jsonFields :: Query
+jsonFields =
+  select'
+    [ expr (col "id")
+    , as (jsonGetText (col "payload") (str "email")) "email"
+    ]
+    # from "documents"
+    # where_
+        ( and
+            [ jsonContains (col "payload") (str "{\"status\": \"paid\"}")
+            , jsonHasKey (col "payload") (str "email")
+            ]
+        )
+    # orderBy [ asc (col "id") ]
 
 -- #example exists
 -- # EXISTS
@@ -700,6 +724,7 @@ selectExamples =
   , { name: "distinct",             statement: SelectStmt distinctExample }
   , { name: "distinct-on",          statement: SelectStmt distinctOnExample }
   , { name: "functions-and-casts",  statement: SelectStmt functionsAndCasts }
+  , { name: "json-fields",          statement: SelectStmt jsonFields }
   , { name: "exists",               statement: SelectStmt existsExample }
   , { name: "not-exists",           statement: SelectStmt notExistsExample }
   , { name: "subquery-in",          statement: SelectStmt subqueryIn }

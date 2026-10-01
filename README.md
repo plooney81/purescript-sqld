@@ -241,6 +241,69 @@ From `Sqld.Expr`:
 | `anyOf :: String -> Expr -> Expr -> Expr` | `anyOf ">" (col "n") (sub q)` | `"n" > ANY (SELECT …)` |
 | `allOf :: String -> Expr -> Expr -> Expr` | `allOf "<" (col "n") (sub q)` | `"n" < ALL (SELECT …)` |
 
+### JSON operators
+
+PostgreSQL's `jsonb` operators, as named helpers over `binOp`. Unlike `binOp`
+these are safe for any input — they take no operator string from the caller, so
+the only operators they can emit are the seven below. That is the substitution
+[Trusted input only](#trusted-input-only) asks for, made once here instead of in
+each caller.
+
+| Constructor | Example | SQL |
+|---|---|---|
+| `jsonGet :: Expr -> Expr -> Expr` | `jsonGet (col "payload") (str "user")` | `"payload" -> $1` |
+| `jsonGetText :: Expr -> Expr -> Expr` | `jsonGetText (col "payload") (str "email")` | `"payload" ->> $1` |
+| `jsonContains :: Expr -> Expr -> Expr` | `jsonContains (col "payload") (str "{\"paid\": true}")` | `"payload" @> $1` |
+| `jsonContainedBy :: Expr -> Expr -> Expr` | `jsonContainedBy (col "payload") doc` | `"payload" <@ $1` |
+| `jsonHasKey :: Expr -> Expr -> Expr` | `jsonHasKey (col "payload") (str "email")` | `"payload" ? $1` |
+| `jsonConcat :: Expr -> Expr -> Expr` | `jsonConcat (col "payload") (str "{\"seen\": true}")` | `"payload" \|\| $1` |
+| `jsonDelete :: Expr -> Expr -> Expr` | `jsonDelete (col "payload") (str "tmp")` | `"payload" - $1` |
+
+**What the bound parameter is.** PostgreSQL decides this, not sqld, and it is
+not the same for all seven:
+
+| Binds `$n` as | Operators | So the right operand is |
+|---|---|---|
+| `text` | `->`, `->>`, `?`, `-` | a key |
+| `jsonb` | `@>`, `<@`, `\|\|` | a whole JSON document |
+
+Passing a bare key where a document is wanted is not a quiet failure — the
+inlined form runs jsonb's input function while parsing, so `'paid'` is rejected
+where `'{"status": "paid"}'` is accepted.
+
+**An integer key needs a cast.** A key binds as `text` whatever you pass, so
+`jsonGet doc (int 0)` looks up the object key `"0"` rather than indexing an
+array. Say which you meant:
+
+```purescript
+jsonGet (col "payload") (str "tags")               -- object key
+jsonGet (col "payload") (cast (int 0) "integer")   -- array element
+-- "payload" -> $1     and     "payload" -> $1::integer
+```
+
+Both are valid SQL, so nothing rejects the one you did not mean. This is also
+the one place the debug formatters can mislead: an inlined `0` is typed
+`integer` where the bound `$1` is not, so `formatInline` shows the array form
+while `format` runs the object one. The cast makes the two agree.
+
+**`jsonHasKey` emits `?`.** `format` is unaffected — its placeholders are `$1`,
+`$2`, … and `?` is only another operator character — but some drivers and query
+proxies treat `?` as a parameter marker of their own and will mangle it.
+`node-postgres`, used in the [quick start](#quick-start), does not. If yours
+does, `app "jsonb_exists" [doc, key]` is the same operator as a function call.
+The operator also tests for a top-level array element or string value, not only
+a key; `jsonHasKey` is the name it is usually reached for rather than the whole
+of what it does.
+
+Precedence needs no thought: `->>` binds tighter than a comparison, so
+`jsonGetText (col "p") (str "k") .== str "v"` emits no brackets, and `->` chains
+left. `jsonDelete` is the exception worth knowing — `-` is arithmetic
+precedence, which binds tighter than `->`, so a `jsonGet` inside one is
+bracketed. PostgreSQL rejects it otherwise.
+
+The path operators — `#>`, `#>>`, `?|`, `?&`, `#-` — are not here. They take a
+`text[]`, which needs an array constructor sqld does not have yet.
+
 ### Generic nodes
 
 The AST keeps only a handful of expression constructors. `App`, `BinOp`, `Cast`
@@ -251,7 +314,7 @@ still reachable without falling back to `raw`:
 | Constructor | Example | SQL |
 |---|---|---|
 | `app :: String -> Array Expr -> Expr` | `app "LOWER" [col "email"]` | `LOWER("email")` |
-| `binOp :: String -> Expr -> Expr -> Expr` | `binOp "@>" (col "tags") (raw "ARRAY['a']")` | `"tags" @> ARRAY['a']` |
+| `binOp :: String -> Expr -> Expr -> Expr` | `binOp "&&" (col "tags") (raw "ARRAY['a']")` | `"tags" && ARRAY['a']` |
 | `unary :: String -> Expr -> Expr` | `unary "-" (col "n")` | `- "n"` |
 | `postfix :: String -> Expr -> Expr` | `postfix "IS TRUE" (col "ok")` | `"ok" IS TRUE` |
 | `cast :: Expr -> String -> Expr` | `cast (col "id") "text"` | `"id"::text` |
@@ -949,6 +1012,11 @@ narrower shape:
 | `app :: String -> Array Expr -> Expr` | a function name |
 | `cast :: Expr -> String -> Expr` | a type name |
 | `orderUsing :: String -> Expr -> OrderExpr` | an operator in `ORDER BY … USING` |
+
+The JSON helpers are deliberately not in this table. `jsonGet` and its six
+siblings each emit one fixed operator and take none from the caller, which is
+what makes them safe where `binOp "->>"` is not — see
+[JSON operators](#json-operators).
 
 A user-driven sort direction or comparison is the realistic way data arrives
 here. Map the request's vocabulary onto a fixed set in your own code rather

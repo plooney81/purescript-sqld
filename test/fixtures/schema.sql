@@ -53,6 +53,16 @@ CREATE TABLE articles
   , published_at timestamptz
   );
 
+-- The only `jsonb` in the fixture, and deliberately its own table rather than a
+-- column on `users`: `departments` shares exactly one column name with `users`,
+-- which is what `NATURAL JOIN` and `USING ("department")` find, and a jsonb
+-- column added there would quietly change what those queries mean.
+CREATE TABLE documents
+  ( id       integer PRIMARY KEY
+  , user_id  integer NOT NULL REFERENCES users (id)
+  , payload  jsonb NOT NULL
+  );
+
 -- Identifiers chosen to break out of their own quoting: each one ends the
 -- quoted region and starts fresh SQL if `Sqld.Format.quoteIdent` ever stops
 -- doubling an embedded `"`. The corpus selects from this table, so the harness

@@ -2,7 +2,7 @@ module Test.Sqld.ExprSpec where
 
 import Prelude (Unit, discard, (#), (<>))
 import Sqld.Core (FrameMode(..), Literal(..), emptyWindow)
-import Sqld.Expr (allOf, and, anyOf, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, eqAny, exists, filterWhere, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, lag, lead, like, not, notIn, or, orderWindow, orderWindow', over, partitionBy, partitionBy', preceding, range, rank, raw, rowNumber, rows, someOf, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.==), (.>), (.>=))
+import Sqld.Expr (allOf, and, anyOf, avg, between, binOp, bool, cast, coalesce, col, count, countStar, currentRow, denseRank, eqAny, exists, filterWhere, following, frameFrom, groups, in_, inSub, int, isNotNull, isNull, jsonConcat, jsonContainedBy, jsonContains, jsonDelete, jsonGet, jsonGetText, jsonHasKey, lag, lead, like, not, notIn, or, orderWindow, orderWindow', over, partitionBy, partitionBy', preceding, range, rank, raw, rowNumber, rows, someOf, str, sub, sum_, unboundedFollowing, unboundedPreceding, upper, withFrame, (.!=), (.==), (.>), (.>=))
 import Sqld.Format (format, formatInline)
 import Sqld.Select (as, asc, cols, desc, expr, from, groupBy, having, orderBy, select', star, where_)
 import Test.Spec (Spec, describe, it)
@@ -576,3 +576,113 @@ exprSpec = describe "Sqld.Expr" do
             # formatInline
       query `shouldEqual`
         "SELECT * FROM \"users\" WHERE \"id\" = ANY (SELECT \"user_id\" FROM \"orders\")"
+
+  describe "jsonb operators" do
+    it "-> reads a key as jsonb" do
+      let query = select' [expr (jsonGet (col "payload") (str "user"))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual` "SELECT \"payload\" -> 'user' FROM \"documents\""
+
+    it "->> reads a key as text" do
+      let query = select' [expr (jsonGetText (col "payload") (str "email"))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual` "SELECT \"payload\" ->> 'email' FROM \"documents\""
+
+    it "@> tests containment" do
+      let query = select' [star]
+            # from "documents"
+            # where_ (jsonContains (col "payload") (str "{\"paid\": true}"))
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"documents\" WHERE \"payload\" @> '{\"paid\": true}'"
+
+    it "<@ tests reverse containment" do
+      let query = select' [star]
+            # from "documents"
+            # where_ (jsonContainedBy (col "payload") (str "{\"a\": 1, \"b\": 2}"))
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"documents\" WHERE \"payload\" <@ '{\"a\": 1, \"b\": 2}'"
+
+    it "? tests for a key" do
+      let query = select' [star]
+            # from "documents"
+            # where_ (jsonHasKey (col "payload") (str "email"))
+            # formatInline
+      query `shouldEqual` "SELECT * FROM \"documents\" WHERE \"payload\" ? 'email'"
+
+    it "|| merges two documents" do
+      let query = select' [expr (jsonConcat (col "payload") (str "{\"seen\": true}"))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"payload\" || '{\"seen\": true}' FROM \"documents\""
+
+    it "- removes a key" do
+      let query = select' [expr (jsonDelete (col "payload") (str "tmp"))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual` "SELECT \"payload\" - 'tmp' FROM \"documents\""
+
+  describe "jsonb operator precedence" do
+    -- `->>` is an "other operator", which PostgreSQL binds tighter than a
+    -- comparison, so the comparison needs no brackets around it.
+    it "->> binds tighter than =" do
+      let query = select' [star]
+            # from "documents"
+            # where_ (jsonGetText (col "payload") (str "email") .== str "a@b.c")
+            # formatInline
+      query `shouldEqual`
+        "SELECT * FROM \"documents\" WHERE \"payload\" ->> 'email' = 'a@b.c'"
+
+    it "-> chains to the left without brackets" do
+      let query = select' [expr (jsonGet (jsonGet (col "payload") (str "a")) (str "b"))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual` "SELECT \"payload\" -> 'a' -> 'b' FROM \"documents\""
+
+    it "a -> on the right is bracketed" do
+      let query = select' [expr (jsonGet (col "payload") (jsonGet (col "other") (str "a")))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual`
+        "SELECT \"payload\" -> (\"other\" -> 'a') FROM \"documents\""
+
+    -- `-` is arithmetic precedence, which binds tighter than `->`, so the left
+    -- operand has to be bracketed or PostgreSQL reads `$1 - $2` as the right
+    -- operand of `->` and rejects the statement outright.
+    it "a -> under a - is bracketed" do
+      let query = select' [expr (jsonDelete (jsonGet (col "payload") (str "a")) (str "b"))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual`
+        "SELECT (\"payload\" -> 'a') - 'b' FROM \"documents\""
+
+  describe "jsonb keys are text unless cast" do
+    -- The two below are different queries, and both are valid SQL. An uncast
+    -- key binds as `text`, so it reads the object key "0"; the cast one indexes
+    -- into an array. Nothing rejects the one you did not mean, which is why
+    -- both are pinned here.
+    it "an uncast integer key is an object lookup" do
+      let result = select' [expr (jsonGet (col "payload") (int 0))]
+            # from "documents"
+            # format
+      result.sql `shouldEqual` "SELECT \"payload\" -> $1 FROM \"documents\""
+      result.params `shouldEqual` [LitInt 0]
+
+    it "a cast integer key indexes an array" do
+      let result = select' [expr (jsonGet (col "payload") (cast (int 0) "integer"))]
+            # from "documents"
+            # format
+      result.sql `shouldEqual` "SELECT \"payload\" -> $1::integer FROM \"documents\""
+      result.params `shouldEqual` [LitInt 0]
+
+    -- Inlining types the literal where binding does not, so these two spellings
+    -- of the same expression resolve to different operators.
+    it "inlining an integer key picks the array operator instead" do
+      let query = select' [expr (jsonGet (col "payload") (int 0))]
+            # from "documents"
+            # formatInline
+      query `shouldEqual` "SELECT \"payload\" -> 0 FROM \"documents\""

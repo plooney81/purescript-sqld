@@ -29,12 +29,21 @@ import Data.String as String
 -- | The column types the fixture schema uses. Small on purpose: the generators
 -- | build expressions by type, so every type here needs literals, operators and
 -- | functions of its own, and one that earns none of those buys no coverage.
+-- |
+-- | `TyJson` is the exception, and knowingly so. It exists because the drift
+-- | check compares this module against `schema.sql` and the corpus needs a real
+-- | `jsonb` column to point at — not because the generator builds jsonb
+-- | expressions, which it does not: `TyJson` is kept out of `allTypes`,
+-- | `genType` and `genOrderedType`, so `genExpr` never sees it. Teaching the
+-- | generator to use it is its own piece of work, because the operators that
+-- | return `jsonb` are a different set from the ones that take it.
 data SqlType
   = TyInt
   | TyNum
   | TyText
   | TyBool
   | TyTime
+  | TyJson
 
 derive instance Eq SqlType
 derive instance Ord SqlType
@@ -51,6 +60,7 @@ typeName TyNum  = "numeric"
 typeName TyText = "text"
 typeName TyBool = "boolean"
 typeName TyTime = "timestamptz"
+typeName TyJson = "jsonb"
 
 type Column = { name :: String, ty :: SqlType }
 type Table = { name :: String, columns :: Array Column }
@@ -100,6 +110,13 @@ fixtureSchema =
         [ { name: "id",           ty: TyInt }
         , { name: "title",        ty: TyText }
         , { name: "published_at", ty: TyTime }
+        ]
+    }
+  , { name: "documents"
+    , columns:
+        [ { name: "id",      ty: TyInt }
+        , { name: "user_id", ty: TyInt }
+        , { name: "payload", ty: TyJson }
         ]
     }
   ]
